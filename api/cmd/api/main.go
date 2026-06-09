@@ -22,6 +22,7 @@ import (
 	"github.com/helios-cicd/helios/api/internal/db"
 	"github.com/helios-cicd/helios/api/internal/handler"
 	"github.com/helios-cicd/helios/api/internal/middleware"
+	"github.com/helios-cicd/helios/api/internal/repository"
 	"github.com/helios-cicd/helios/api/internal/service"
 	heliosjwt "github.com/helios-cicd/helios/api/pkg/jwt"
 )
@@ -70,8 +71,10 @@ func main() {
 	rdb := mustOpenRedis()
 	issuer := mustNewIssuer()
 	userSvc := service.NewUserService(gdb)
+	projectSvc := service.NewProjectService(repository.NewProjectRepository(gdb))
 	store := authstore.New(rdb)
 	authH := handler.NewAuthHandler(userSvc, issuer, store, gdb)
+	projectH := handler.NewProjectHandler(projectSvc)
 	authMW := middleware.RequireAuth(middleware.AuthDeps{Issuer: issuer, Authstore: store})
 
 	// ===== 路由 =====
@@ -94,6 +97,11 @@ func main() {
 
 	v1 := r.Group("/api/v1")
 	authH.Register(v1.Group("/auth"), authMW)
+
+	// 项目资源 — 全部需要登录
+	protected := v1.Group("")
+	protected.Use(authMW)
+	projectH.Register(protected)
 
 	addr := os.Getenv("HELIOS_API_ADDR")
 	if addr == "" {

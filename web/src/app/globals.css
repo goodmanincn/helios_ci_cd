@@ -39,17 +39,29 @@ html, body {
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
   padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.875rem; font-weight: 500;
-  border: 1px solid transparent; cursor: pointer; transition: all 0.15s;
+  border: 1px solid var(--border); cursor: pointer; transition: all 0.15s;
+  background: var(--bg-elev); color: var(--fg-mute);
 }
+.btn:hover { color: var(--fg); border-color: var(--border-strong); background: var(--bg-elev-2); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-primary {
-  background: var(--accent); color: white;
+  background: var(--accent); color: white; border-color: var(--accent);
 }
-.btn-primary:hover { background: var(--accent-2); }
+.btn-primary:hover { background: var(--accent-2); border-color: var(--accent-2); }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-ghost {
   background: transparent; color: var(--fg-mute); border-color: var(--border);
 }
 .btn-ghost:hover { color: var(--fg); border-color: var(--border-strong); background: var(--bg-elev); }
+
+/* select / textarea 复用 .input 时显式覆盖浏览器默认 */
+select.input, textarea.input { background: var(--bg-elev); color: var(--fg); }
+select.input option { background: var(--bg-elev); color: var(--fg); }
+.err-msg {
+  font-size: 0.8125rem; padding: 0.5rem 0.75rem; border-radius: 6px;
+  background: rgba(239, 68, 68, 0.1); color: var(--danger);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
 
 .input {
   width: 100%; padding: 0.625rem 0.875rem;
