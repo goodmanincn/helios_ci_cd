@@ -1,0 +1,5 @@
+DROP TABLE IF EXISTS runners;
+DROP TABLE IF EXISTS host_group_members;
+DROP TABLE IF EXISTS host_groups;
+DROP TABLE IF EXISTS hosts;
+DROP TABLE IF EXISTS clusters;

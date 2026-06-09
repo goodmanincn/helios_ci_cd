@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"log"
 	"net/http"
 	"os"
@@ -12,6 +13,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/helios-cicd/helios/api/internal/db"
 )
 
 // Version 通过 ldflags 注入,默认 dev
@@ -22,6 +25,39 @@ var (
 )
 
 func main() {
+	var (
+		migrateOnly = flag.Bool("migrate", false, "run DB migrations and exit")
+		skipMigrate = flag.Bool("skip-migrate", false, "skip auto-migration on startup")
+	)
+	flag.Parse()
+
+	dsn := os.Getenv("HELIOS_DB_DSN")
+
+	// 模式 1: 仅迁移
+	if *migrateOnly {
+		if dsn == "" {
+			log.Fatal("--migrate requires HELIOS_DB_DSN env var")
+		}
+		log.Println("running database migrations...")
+		if err := db.Migrate(dsn); err != nil {
+			log.Fatalf("migrate failed: %v", err)
+		}
+		v, dirty, err := db.Version(dsn)
+		if err != nil {
+			log.Fatalf("version check failed: %v", err)
+		}
+		log.Printf("migrations applied: schema version=%d dirty=%v", v, dirty)
+		return
+	}
+
+	// 模式 2: 启动 server (默认先跑迁移)
+	if !*skipMigrate && dsn != "" {
+		log.Println("auto-migrating database...")
+		if err := db.Migrate(dsn); err != nil {
+			log.Fatalf("startup migration failed: %v", err)
+		}
+	}
+
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())

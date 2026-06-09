@@ -39,7 +39,7 @@ setup:  ## 首次环境准备 (复制 .env / 安装 hooks)
 	@test -f .env || cp .env.example .env && echo "✓ .env 已创建,请按需修改"
 	@command -v golangci-lint >/dev/null 2>&1 || (echo "→ 安装 golangci-lint" && go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest)
 	@command -v gofumpt >/dev/null 2>&1 || (echo "→ 安装 gofumpt" && go install mvdan.cc/gofumpt@latest)
-	@command -v migrate >/dev/null 2>&1 || (echo "→ 安装 golang-migrate" && go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest)
+	@command -v migrate >/dev/null 2>&1 || (echo "→ 安装 golang-migrate (--> \$$GOPATH/bin)" && GOBIN=$$(go env GOPATH)/bin go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1)
 	@echo "✓ setup 完成"
 
 # === 依赖服务 ===
@@ -131,18 +131,27 @@ build-web:  ## 构建 Web 静态资源
 	@test -d web && cd web && pnpm build || echo "(web/ 未初始化,跳过)"
 
 # === 迁移 (M0.2 完成后启用) ===
+MIGRATIONS_DIR := api/internal/db/migrations
+
 .PHONY: migrate-up
 migrate-up:  ## 应用所有 pending 数据库迁移
-	@migrate -path db/migrations -database "$$HELIOS_DB_DSN" up
+	@set -a && [ -f .env ] && . ./.env; set +a; \
+	migrate -path $(MIGRATIONS_DIR) -database "$$HELIOS_DB_DSN" up
 
 .PHONY: migrate-down
 migrate-down:  ## 回滚最近一次迁移
-	@migrate -path db/migrations -database "$$HELIOS_DB_DSN" down 1
+	@set -a && [ -f .env ] && . ./.env; set +a; \
+	migrate -path $(MIGRATIONS_DIR) -database "$$HELIOS_DB_DSN" down 1
 
 .PHONY: migrate-create
 migrate-create:  ## 新建迁移 (NAME=add_xxx)
 	@test -n "$(NAME)" || (echo "用法: make migrate-create NAME=add_xxx"; exit 1)
-	@migrate create -ext sql -dir db/migrations -seq $(NAME)
+	@migrate create -ext sql -dir $(MIGRATIONS_DIR) -seq $(NAME)
+
+.PHONY: migrate-version
+migrate-version:  ## 查看当前 schema 版本
+	@set -a && [ -f .env ] && . ./.env; set +a; \
+	migrate -path $(MIGRATIONS_DIR) -database "$$HELIOS_DB_DSN" version
 
 .PHONY: seed
 seed:  ## 灌入种子数据 (M0.2 后启用)
