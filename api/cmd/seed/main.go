@@ -20,7 +20,7 @@ const (
 	defaultOrgName     = "Acme Inc."
 	defaultAdminUser   = "admin"
 	defaultAdminEmail  = "admin@helios.local"
-	defaultAdminPasswd = "helios..." // 仅 dev,生产 seed 必须改
+	defaultAdminPasswd = "admin12345" // dev 默认密码,与 spec 对齐;生产 seed 必须改
 	demoProjectSlug    = "api-gateway"
 	demoProjectRepoURL = "https://github.com/helios-cicd/demo-api.git"
 )
