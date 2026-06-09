@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go-lint-and-test:
+    name: Go ${{ matrix.module }} (${{ matrix.go }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ["1.22", "1.23"]
+        module: [api, worker, runner, cli]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+
+      - name: Download deps
+        working-directory: ${{ matrix.module }}
+        run: go mod download
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.61
+          working-directory: ${{ matrix.module }}
+          args: --config=${{ github.workspace }}/.golangci.yml --timeout=5m
+
+      - name: Test with race + coverage
+        working-directory: ${{ matrix.module }}
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Upload coverage
+        if: matrix.go == '1.23'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.module }}
+          path: ${{ matrix.module }}/coverage.out
+
+  go-build:
+    name: Build Go binaries
+    needs: go-lint-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+      - name: Build all binaries
+        run: make build-go VERSION=${{ github.sha }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: helios-binaries-${{ github.sha }}
+          path: bin/
+          retention-days: 7
+
+  web:
+    name: Web (Next.js)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip if web/ missing
+        id: check
+        run: |
+          if [ ! -f web/package.json ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "::warning::web/ not yet initialized, skipping"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+        working-directory: .
+
+      - uses: pnpm/action-setup@v4
+        if: steps.check.outputs.skip != 'true'
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.skip != 'true'
+        with:
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install
+        if: steps.check.outputs.skip != 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        if: steps.check.outputs.skip != 'true'
+        run: pnpm lint
+
+      - name: Build
+        if: steps.check.outputs.skip != 'true'
+        run: pnpm build
+
+  notify-on-failure:
+    name: Notify on failure
+    needs: [go-lint-and-test, go-build, web]
+    if: failure() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Placeholder
+        run: 'echo "TODO M7 - hook up dingtalk/email notifier"'

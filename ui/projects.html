@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>项目 — Helios CI/CD</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+.proj-ic{width:32px;height:32px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:16px}
+.proj-cd{transition:border-color 0.15s;cursor:pointer}
+.proj-cd:hover{border-color:var(--bh)}
+</style>
+</head>
+<body>
+<div class="app">
+<aside class="sb">
+  <div class="logo"><div class="mark"></div><span>Helios</span></div>
+  <div class="org"><div class="av">A</div><span>Acme Inc.</span></div>
+  <div class="ns">
+    <div class="nt">工作区</div>
+    <div class="ni active">📦 项目<span class="badge">12</span></div>
+    <div class="ni">🔀 流水线</div>
+    <div class="ni">▶ 执行记录<span class="badge">3</span></div>
+  </div>
+  <div class="ns">
+    <div class="nt">基础设施</div>
+    <div class="ni">☸ 集群</div>
+    <div class="ni">🖥 主机</div>
+    <div class="ni">🔐 密钥</div>
+  </div>
+  <div class="ns">
+    <div class="nt">市场</div>
+    <div class="ni">🧩 插件</div>
+    <div class="ni">📋 模板</div>
+  </div>
+  <div style="margin-top:auto">
+    <div class="ni">🕐 最近活动</div>
+    <div class="ni">❓ 帮助与文档</div>
+  </div>
+</aside>
+<main class="main">
+  <header class="tb">
+    <div class="bc"><span>Acme Inc.</span><span class="sp">/</span><span class="cu">项目</span></div>
+    <div class="ta">
+      <div class="search"><span>搜索 / 命令</span><span class="kbd">⌘K</span></div>
+      <button class="btn bgh">🔔</button>
+      <div class="av" style="background:#5e6ad2">R</div>
+    </div>
+  </header>
+  <div class="ct">
+
+  <div class="ch">
+    <div>
+      <h1>项目</h1>
+      <div class="sub">12 个活跃项目 · 本周 87 次构建 · 成功率 94.3%</div>
+    </div>
+    <div class="row g2">
+      <button class="btn">导入 Git 仓库</button>
+      <button class="btn bp">+ 新建项目</button>
+    </div>
+  </div>
+
+  <div class="gd" style="grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:28px">
+    <div class="cd"><div class="cdm">本周构建</div><div style="font-size:24px;font-weight:590;margin:4px 0">87</div><span class="pill ok"><span class="d"></span>+12%</span></div>
+    <div class="cd"><div class="cdm">成功率</div><div style="font-size:24px;font-weight:590;margin:4px 0">94.3%</div><span class="pill ok"><span class="d"></span>正常</span></div>
+    <div class="cd"><div class="cdm">平均时长</div><div style="font-size:24px;font-weight:590;margin:4px 0">4m 28s</div><span class="pill nu"><span class="d"></span>稳定</span></div>
+    <div class="cd"><div class="cdm">部署目标</div><div style="font-size:24px;font-weight:590;margin:4px 0">7</div><span class="pill nu"><span class="d"></span>4 K8s · 3 物理机</span></div>
+  </div>
+
+  <div class="row g2" style="margin-bottom:14px">
+    <div class="search" style="min-width:280px"><span>🔍 搜索项目...</span></div>
+    <button class="btn bsm">所有项目 ⌄</button>
+    <button class="btn bsm">所有状态 ⌄</button>
+    <button class="btn bsm">最近活动 ⌄</button>
+    <div style="margin-left:auto" class="mu">显示 12 / 12</div>
+  </div>
+
+  <div class="gd" style="grid-template-columns:repeat(3,1fr);gap:14px">
+
+    <div class="cd proj-cd">
+      <div class="row g2" style="margin-bottom:10px">
+        <div class="proj-ic" style="background:linear-gradient(135deg,#5e6ad2,#7170ff)">📦</div>
+        <div style="flex:1;min-width:0">
+          <div class="cdt">api-gateway</div>
+          <div class="mono" style="font-size:11px;color:var(--t4)">acme/api-gateway · main</div>
+        </div>
+        <span class="pill ok"><span class="d"></span>passing</span>
+      </div>
+      <div class="mu" style="font-size:12px;margin-bottom:12px">组织级 API 网关 · Go 1.22 · prod-tke</div>
+      <div class="row g2" style="font-size:11px;color:var(--t3);border-top:1px solid var(--bs);padding-top:10px">
+        <span>🏗 2分钟前</span><span class="mono">c8a4f2e</span><span style="margin-left:auto">14 runs</span>
+      </div>
+    </div>
+
+    <div class="cd proj-cd">
+      <div class="row g2" style="margin-bottom:10px">
+        <div class="proj-ic" style="background:linear-gradient(135deg,#10b981,#22d3ee)">🌐</div>
+        <div style="flex:1;min-width:0">
+          <div class="cdt">web-frontend</div>
+          <div class="mono" style="font-size:11px;color:var(--t4)">acme/web-frontend · develop</div>
+        </div>
+        <span class="pill rn"><span class="d"></span>building</span>
+      </div>
+      <div class="mu" style="font-size:12px;margin-bottom:12px">Next.js 14 · Tailwind · Vercel + 自建 CDN</div>
+      <div class="row g2" style="font-size:11px;color:var(--t3);border-top:1px solid var(--bs);padding-top:10px">
+        <span>🏗 进行中</span><span class="mono">a3b2c91</span><span style="margin-left:auto">28 runs</span>
+      </div>
+    </div>
+
+    <div class="cd proj-cd">
+      <div class="row g2" style="margin-bottom:10px">
+        <div class="proj-ic" style="background:linear-gradient(135deg,#f59e0b,#ef4444)">⚙</div>
+        <div style="flex:1;min-width:0">
+          <div class="cdt">data-pipeline</div>
+          <div class="mono" style="font-size:11px;color:var(--t4)">acme/data-pipeline · main</div>
+        </div>
+        <span class="pill dn"><span class="d"></span>failed</span>
+      </div>
+      <div class="mu" style="font-size:12px;margin-bottom:12px">ETL 流水线 · Python 3.11 · K8s CronJob</div>
+      <div class="row g2" style="font-size:11px;color:var(--t3);border-top:1px solid var(--bs);padding-top:10px">
+        <span>❌ 12分钟前</span><span class="mono">f7e3a09</span><span style="margin-left:auto">7 runs</span>
+      </div>
+    </div>
+
+    <div class="cd proj-cd">
+      <div class="row g2" style="margin-bottom:10px">
+        <div class="proj-ic" style="background:linear-gradient(135deg,#a78bfa,#ec4899)">🔐</div>
+        <div style="flex:1;min-width:0">
+          <div class="cdt">auth-service</div>
+          <div class="mono" style="font-size:11px;color:var(--t4)">acme/auth-service · main</div>
+        </div>
+        <span class="pill ok"><span class="d"></span>passing</span>
+      </div>
+      <div class="mu" style="font-size:12px;margin-bottom:12px">OIDC + JWT · Go · 阿里云 ACK</div>
+      <div class="row g2" style="font-size:11px;color:var(--t3);border-top:1px solid var(--bs);padding-top:10px">
+        <span>✓ 1小时前</span><span class="mono">9d8e1c4</span><span style="margin-left:auto">22 runs</span>
+      </div>
+    </div>
+
+    <div class="cd proj-cd">
+      <div class="row g2" style="margin-bottom:10px">
+        <div class="proj-ic" style="background:linear-gradient(135deg,#22d3ee,#3b82f6)">📊</div>
+        <div style="flex:1;min-width:0">
+          <div class="cdt">analytics-svc</div>
+          <div class="mono" style="font-size:11px;color:var(--t4)">acme/analytics · main</div>
+        </div>
+        <span class="pill wn"><span class="d"></span>approval</span>
+      </div>
+      <div class="mu" style="font-size:12px;margin-bottom:12px">ClickHouse · 待生产部署审批</div>
+      <div class="row g2" style="font-size:11px;color:var(--t3);border-top:1px solid var(--bs);padding-top:10px">
+        <span>⏸ 等待审批</span><span class="mono">e2a91b7</span><span style="margin-left:auto">9 runs</span>
+      </div>
+    </div>
+
+    <div class="cd proj-cd" style="border-style:dashed;background:transparent;display:flex;align-items:center;justify-content:center;min-height:160px;color:var(--t3)">
+      <div style="text-align:center">
+        <div style="font-size:24px">+</div>
+        <div style="font-size:13px;font-weight:510;margin-top:4px">新建项目</div>
+        <div style="font-size:11px;margin-top:4px" class="dm">从 Git 仓库导入或从模板创建</div>
+      </div>
+    </div>
+
+  </div>
+
+  </div>
+</main>
+</div>
+</body>
+</html>

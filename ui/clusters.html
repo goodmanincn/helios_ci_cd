@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>集群与主机 — Helios</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+.tab{padding:8px 12px;font-size:13px;font-weight:510;color:var(--t3);border-bottom:2px solid transparent;cursor:pointer;margin-bottom:-1px}
+.tab:hover{color:var(--t1)}
+.tab.act{color:var(--t1);border-bottom-color:var(--violet)}
+.tbct{margin-left:6px;padding:1px 6px;background:rgba(255,255,255,0.06);border-radius:9999px;font-size:10px;color:var(--t3)}
+.cls{background:rgba(255,255,255,0.02);border:1px solid var(--bd);border-radius:10px;padding:18px;transition:border-color 0.15s}
+.cls:hover{border-color:var(--bh)}
+.pbg{padding:3px 8px;border-radius:4px;font-size:10px;font-weight:600;letter-spacing:0.4px;text-transform:uppercase;font-family:'JetBrains Mono',monospace}
+.pbg.tke{background:rgba(0,109,222,0.15);color:#60a5fa;border:1px solid rgba(0,109,222,0.3)}
+.pbg.ack{background:rgba(255,107,0,0.15);color:#fb923c;border:1px solid rgba(255,107,0,0.3)}
+.pbg.self{background:rgba(94,106,210,0.15);color:#93c5fd;border:1px solid rgba(94,106,210,0.3)}
+.mtg{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.ml{font-size:10px;font-weight:510;color:var(--t4);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px}
+.mv{font-size:16px;font-weight:590;color:var(--t1);letter-spacing:-0.24px}
+.mb{margin-top:6px;height:3px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden}
+.mb span{display:block;height:100%;border-radius:2px}
+</style>
+</head>
+<body>
+<div class="app">
+<aside class="sb">
+  <div class="logo"><div class="mark"></div><span>Helios</span></div>
+  <div class="org"><div class="av">A</div><span>Acme Inc.</span></div>
+  <div class="ns">
+    <div class="nt">工作区</div>
+    <div class="ni">📦 项目<span class="badge">12</span></div>
+    <div class="ni">🔀 流水线</div>
+    <div class="ni">▶ 执行记录<span class="badge">3</span></div>
+  </div>
+  <div class="ns">
+    <div class="nt">基础设施</div>
+    <div class="ni active">☸ 集群</div>
+    <div class="ni">🖥 主机</div>
+    <div class="ni">🔐 密钥</div>
+  </div>
+  <div class="ns">
+    <div class="nt">市场</div>
+    <div class="ni">🧩 插件</div>
+    <div class="ni">📋 模板</div>
+  </div>
+</aside>
+<main class="main">
+  <header class="tb">
+    <div class="bc"><span>Acme Inc.</span><span class="sp">/</span><span class="cu">集群与主机</span></div>
+    <div class="ta">
+      <div class="search"><span>搜索 / 命令</span><span class="kbd">⌘K</span></div>
+      <button class="btn bgh">🔔</button>
+      <div class="av" style="background:#5e6ad2">R</div>
+    </div>
+  </header>
+  <div class="ct">
+
+  <div class="ch">
+    <div>
+      <h1>集群与主机</h1>
+      <div class="sub">4 个 K8s 集群 · 12 台物理主机 · 全部健康</div>
+    </div>
+    <div class="row g2">
+      <button class="btn">📤 导出 inventory</button>
+      <button class="btn bp">+ 接入集群</button>
+    </div>
+  </div>
+
+  <div class="row g2" style="border-bottom:1px solid var(--bs);margin-bottom:18px">
+    <div class="tab act">Kubernetes 集群 <span class="tbct">4</span></div>
+    <div class="tab">物理主机 <span class="tbct">12</span></div>
+    <div class="tab">主机组 <span class="tbct">3</span></div>
+    <div class="tab">Serverless <span class="tbct">2</span></div>
+  </div>
+
+  <div class="row g2" style="margin-bottom:14px">
+    <div class="search" style="min-width:240px"><span>🔍 搜索集群...</span></div>
+    <button class="btn bsm">所有云厂商 ⌄</button>
+    <button class="btn bsm">所有区域 ⌄</button>
+    <button class="btn bsm">所有状态 ⌄</button>
+  </div>
+
+  <div class="gd" style="grid-template-columns:repeat(2,1fr);gap:14px">
+
+    <div class="cls">
+      <div class="row g2" style="margin-bottom:12px">
+        <div class="pbg tke">TKE</div>
+        <div style="flex:1;min-width:0">
+          <div class="cdt">prod-tke-shanghai</div>
+          <div class="mono" style="font-size:11px;color:var(--t4)">cls-8a4f2e91 · ap-shanghai · k8s 1.28</div>
+        </div>
+        <span class="pill ok"><span class="d"></span>healthy</span>
+      </div>
+      <div class="mtg">
+        <div><div class="ml">节点</div><div class="mv">12 <span class="mu">/ 12</span></div></div>
+        <div><div class="ml">CPU</div><div class="mv">68%</div><div class="mb"><span style="width:68%;background:var(--wn)"></span></div></div>
+        <div><div class="ml">内存</div><div class="mv">54%</div><div class="mb"><span style="width:54%;background:var(--ok)"></span></div></div>
+        <div><div class="ml">命名空间</div><div class="mv">8</div></div>
+      </div>
+      <div class="row g2" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--bs);font-size:11px;color:var(--t3)">
+        <span>🚀 24 个部署 · 12分钟前</span>
+        <span style="margin-left:auto" class="row g2">
+          <button class="btn bsm bgh">详情</button>
+          <button class="btn bsm bgh">测试</button>
+        </span>
+      </div>
+    </div>
+
+    <div class="cls">
+      <div class="row g2" style="margin-bottom:12px">
+        <div class="pbg ack">ACK</div>
+        <div style="flex:1;min-width:0">
+          <div class="cdt">prod-ack-hangzhou</div>
+          <div class="mono" style="font-size:11px;color:var(--t4)">c91f2a8e · cn-hangzhou · k8s 1.30</div>
+        </div>
+        <span class="pill ok"><span class="d"></span>healthy</span>
+      </div>
+      <div class="mtg">
+        <div><div class="ml">节点</div><div class="mv">8 <span class="mu">/ 8</span></div></div>
+        <div><div class="ml">CPU</div><div class="mv">42%</div><div class="mb"><span style="width:42%;background:var(--ok)"></span></div></div>
+        <div><div class="ml">内存</div><div class="mv">38%</div><div class="mb"><span style="width:38%;background:var(--ok)"></span></div></div>
+        <div><div class="ml">命名空间</div><div class="mv">5</div></div>
+      </div>
+      <div class="row g2" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--bs);font-size:11px;color:var(--t3)">
+        <span>🚀 15 个部署 · 1小时前</span>
+        <span style="margin-left:auto" class="row g2">
+          <button class="btn bsm bgh">详情</button>
+          <button class="btn bsm bgh">测试</button>
+        </span>
+      </div>
+    </div>
+
+    <div class="cls">
+      <div class="row g2" style="margin-bottom:12px">
+        <div class="pbg self">自建</div>
+        <div style="flex:1;min-width:0">
+          <div class="cdt">staging-k8s</div>
+          <div class="mono" style="font-size:11px;color:var(--t4)">kubeadm · idc-bj01 · k8s 1.29</div>
+        </div>
+        <span class="pill wn"><span class="d"></span>2 节点降级</span>
+      </div>
+      <div class="mtg">
+        <div><div class="ml">节点</div><div class="mv">6 <span class="mu">/ 8</span></div></div>
+        <div><div class="ml">CPU</div><div class="mv">81%</div><div class="mb"><span style="width:81%;background:var(--dn)"></span></div></div>
+        <div><div class="ml">内存</div><div class="mv">73%</div><div class="mb"><span style="width:73%;background:var(--wn)"></span></div></div>
+        <div><div class="ml">命名空间</div><div class="mv">12</div></div>
+      </div>
+      <div class="row g2" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--bs);font-size:11px;color:var(--t3)">
+        <span style="color:var(--wn)">⚠ node-3/node-7 NotReady</span>
+        <span style="margin-left:auto" class="row g2">
+          <button class="btn bsm bgh">详情</button>
+          <button class="btn bsm bgh">测试</button>
+        </span>
+      </div>
+    </div>
+
+    <div class="cls">
+      <div class="row g2" style="margin-bottom:12px">
+        <div class="pbg self">自建</div>
+        <div style="flex:1;min-width:0">
+          <div class="cdt">dev-k3s</div>
+          <div class="mono" style="font-size:11px;color:var(--t4)">k3s 1.30 · idc-bj02</div>
+        </div>
+        <span class="pill ok"><span class="d"></span>healthy</span>
+      </div>
+      <div class="mtg">
+        <div><div class="ml">节点</div><div class="mv">3 <span class="mu">/ 3</span></div></div>
+        <div><div class="ml">CPU</div><div class="mv">28%</div><div class="mb"><span style="width:28%;background:var(--ok)"></span></div></div>
+        <div><div class="ml">内存</div><div class="mv">45%</div><div class="mb"><span style="width:45%;background:var(--ok)"></span></div></div>
+        <div><div class="ml">命名空间</div><div class="mv">15</div></div>
+      </div>
+      <div class="row g2" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--bs);font-size:11px;color:var(--t3)">
+        <span>🚀 38 个部署 · 3分钟前</span>
+        <span style="margin-left:auto" class="row g2">
+          <button class="btn bsm bgh">详情</button>
+          <button class="btn bsm bgh">测试</button>
+        </span>
+      </div>
+    </div>
+
+  </div>
+
+  <div style="margin-top:32px">
+    <div class="ch" style="margin-bottom:14px">
+      <div>
+        <h1 style="font-size:18px">物理主机</h1>
+        <div class="sub">12 台主机 · 3 个主机组</div>
+      </div>
+      <button class="btn bsm">+ 添加主机</button>
+    </div>
+
+    <div class="cd" style="padding:0;overflow:hidden">
+      <table class="tbl">
+        <thead><tr><th style="width:30px"><input type="checkbox"/></th><th>主机</th><th>IP</th><th>主机组</th><th>系统</th><th>状态</th><th>最后心跳</th><th></th></tr></thead>
+        <tbody>
+          <tr><td><input type="checkbox"/></td><td style="font-weight:510;color:var(--t1)">web-bj-01</td><td class="mono">10.0.1.21</td><td><span class="pill nu">web-cluster</span></td><td class="mono">Ubuntu 22.04</td><td><span class="pill ok"><span class="d"></span>在线</span></td><td class="mu">12s 前</td><td><button class="btn bsm bgh">⋯</button></td></tr>
+          <tr><td><input type="checkbox"/></td><td style="font-weight:510;color:var(--t1)">web-bj-02</td><td class="mono">10.0.1.22</td><td><span class="pill nu">web-cluster</span></td><td class="mono">Ubuntu 22.04</td><td><span class="pill ok"><span class="d"></span>在线</span></td><td class="mu">8s 前</td><td><button class="btn bsm bgh">⋯</button></td></tr>
+          <tr><td><input type="checkbox"/></td><td style="font-weight:510;color:var(--t1)">db-bj-master</td><td class="mono">10.0.2.10</td><td><span class="pill nu">db-primary</span></td><td class="mono">CentOS 8</td><td><span class="pill ok"><span class="d"></span>在线</span></td><td class="mu">3s 前</td><td><button class="btn bsm bgh">⋯</button></td></tr>
+          <tr><td><input type="checkbox"/></td><td style="font-weight:510;color:var(--t1)">worker-sh-01</td><td class="mono">172.16.3.41</td><td><span class="pill nu">batch-worker</span></td><td class="mono">Debian 12</td><td><span class="pill wn"><span class="d"></span>负载高</span></td><td class="mu">5s 前</td><td><button class="btn bsm bgh">⋯</button></td></tr>
+          <tr><td><input type="checkbox"/></td><td style="font-weight:510;color:var(--t1)">worker-sh-02</td><td class="mono">172.16.3.42</td><td><span class="pill nu">batch-worker</span></td><td class="mono">Debian 12</td><td><span class="pill dn"><span class="d"></span>离线</span></td><td class="mu">8 分钟前</td><td><button class="btn bsm bgh">⋯</button></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  </div>
+</main>
+</div>
+</body>
+</html>

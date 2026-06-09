@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>流水线编辑器 — Helios</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+.pal{padding:6px 10px;font-size:12px;color:var(--t2);border-radius:5px;cursor:grab;margin-bottom:2px;border:1px solid transparent}
+.pal:hover{background:rgba(255,255,255,0.03);border-color:var(--bd);color:var(--t1)}
+.node{position:absolute;background:var(--elev);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;display:flex;align-items:center;gap:10px;cursor:move;box-shadow:0 2px 4px rgba(0,0,0,0.4)}
+.node:hover{border-color:var(--bh)}
+.node.sel{border-color:var(--violet);box-shadow:0 0 0 1px var(--violet)}
+.node.mx{background:rgba(94,106,210,0.08)}
+.node.ap{background:rgba(245,158,11,0.08);border-color:rgba(245,158,11,0.3)}
+.nic{width:28px;height:28px;background:rgba(255,255,255,0.05);border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+.ntl{font-size:13px;font-weight:590;color:var(--t1)}
+.nmt{font-size:10px;color:var(--t3);font-family:'JetBrains Mono',monospace;margin-top:1px}
+.fg{margin-bottom:14px}
+.fg label{display:block;font-size:11px;font-weight:510;color:var(--t4);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px}
+.fg input,.fg select{width:100%;padding:6px 10px;background:rgba(255,255,255,0.02);border:1px solid var(--bd);border-radius:5px;color:var(--t1);font-size:12px;font-family:inherit}
+.fg input:focus,.fg select:focus{outline:none;border-color:var(--violet)}
+.tabbar{display:flex;align-items:center;gap:2px;background:rgba(255,255,255,0.03);border:1px solid var(--bd);border-radius:6px;padding:2px}
+.tabbar .btn{border:none}
+.tabbar .btn.act{background:rgba(94,106,210,0.15);color:var(--t1)}
+</style>
+</head>
+<body>
+<div class="app">
+<aside class="sb">
+  <div class="logo"><div class="mark"></div><span>Helios</span></div>
+  <div class="org"><div class="av">A</div><span>Acme Inc.</span></div>
+  <div class="ns">
+    <div class="nt">工作区</div>
+    <div class="ni">📦 项目<span class="badge">12</span></div>
+    <div class="ni active">🔀 流水线</div>
+    <div class="ni">▶ 执行记录<span class="badge">3</span></div>
+  </div>
+  <div class="ns">
+    <div class="nt">基础设施</div>
+    <div class="ni">☸ 集群</div>
+    <div class="ni">🖥 主机</div>
+    <div class="ni">🔐 密钥</div>
+  </div>
+  <div class="ns">
+    <div class="nt">市场</div>
+    <div class="ni">🧩 插件</div>
+    <div class="ni">📋 模板</div>
+  </div>
+</aside>
+<main class="main">
+  <header class="tb">
+    <div class="bc"><span>Acme Inc.</span><span class="sp">/</span><span>api-gateway</span><span class="sp">/</span><span>流水线</span><span class="sp">/</span><span class="cu">build-and-deploy</span></div>
+    <div class="ta">
+      <div class="search"><span>搜索 / 命令</span><span class="kbd">⌘K</span></div>
+      <button class="btn bgh">🔔</button>
+      <div class="av" style="background:#5e6ad2">R</div>
+    </div>
+  </header>
+
+  <div class="ct" style="padding:0;display:flex;flex-direction:column">
+
+  <div class="row g2" style="padding:14px 24px;border-bottom:1px solid var(--bs)">
+    <div>
+      <div class="row g2">
+        <h1 style="font-size:16px;font-weight:590">build-and-deploy</h1>
+        <span class="pill nu"><span class="d"></span>v3 · 已启用</span>
+      </div>
+      <div class="mu" style="font-size:11px;margin-top:2px">api-gateway · 最后保存 5分钟前 · alice</div>
+    </div>
+    <div class="row g2" style="margin-left:auto">
+      <div class="tabbar">
+        <button class="btn bsm act">画布</button>
+        <button class="btn bsm bgh">YAML</button>
+        <button class="btn bsm bgh">触发器</button>
+        <button class="btn bsm bgh">变量</button>
+        <button class="btn bsm bgh">历史</button>
+      </div>
+      <button class="btn bsm">▶ 试运行</button>
+      <button class="btn bsm bp">保存并启用</button>
+    </div>
+  </div>
+
+  <div style="flex:1;display:grid;grid-template-columns:200px 1fr 320px;min-height:0;overflow:hidden">
+
+    <aside style="border-right:1px solid var(--bs);padding:14px;overflow:auto">
+      <input type="text" placeholder="搜索步骤..." style="width:100%;padding:6px 10px;background:rgba(255,255,255,0.02);border:1px solid var(--bd);border-radius:5px;color:var(--t1);font-size:12px;font-family:inherit;margin-bottom:14px"/>
+      <div class="nt" style="padding:0 0 6px">代码与构建</div>
+      <div class="pal">📥 Git Checkout</div>
+      <div class="pal">🐳 Docker Build</div>
+      <div class="pal">📦 Kaniko</div>
+      <div class="pal">🏗 Buildpacks</div>
+      <div class="nt" style="padding:14px 0 6px">测试与质量</div>
+      <div class="pal">🧪 单元测试</div>
+      <div class="pal">🔍 SonarQube</div>
+      <div class="pal">🛡 Trivy 扫描</div>
+      <div class="nt" style="padding:14px 0 6px">部署</div>
+      <div class="pal">☸ K8s Deploy</div>
+      <div class="pal">🐝 Helm Release</div>
+      <div class="pal">🚀 SSH Deploy</div>
+      <div class="pal">📤 rsync</div>
+      <div class="nt" style="padding:14px 0 6px">控制流</div>
+      <div class="pal">✋ 人工审批</div>
+      <div class="pal">⚡ 并行分组</div>
+      <div class="pal">🔀 条件分支</div>
+      <div class="pal">🔁 Matrix</div>
+      <div class="nt" style="padding:14px 0 6px">通知</div>
+      <div class="pal">💬 钉钉</div>
+      <div class="pal">📧 邮件</div>
+      <div class="pal">🌐 Webhook</div>
+    </aside>
+
+    <div style="position:relative;overflow:auto;background:radial-gradient(circle,rgba(255,255,255,0.04) 1px,transparent 1px) 0 0 / 24px 24px,var(--bg);min-width:0">
+     <div style="position:relative;width:420px;height:880px;margin:0 auto;padding-bottom:60px">
+      <svg width="420" height="880" style="position:absolute;top:0;left:0;pointer-events:none">
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#5e6ad2"/>
+          </marker>
+        </defs>
+        <!-- checkout → 3 matrix tests (fork) -->
+        <path d="M 210 70 C 210 85,105 85,105 100" stroke="#5e6ad2" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+        <path d="M 210 70 L 210 100"               stroke="#5e6ad2" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+        <path d="M 210 70 C 210 85,315 85,315 100" stroke="#5e6ad2" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+        <!-- 3 matrix tests → build (join) -->
+        <path d="M 105 160 C 105 200,210 200,210 220" stroke="#5e6ad2" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+        <path d="M 210 160 L 210 220"                 stroke="#5e6ad2" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+        <path d="M 315 160 C 315 200,210 200,210 220" stroke="#5e6ad2" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+        <!-- vertical main spine -->
+        <path d="M 210 290 L 210 350" stroke="#5e6ad2" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+        <path d="M 210 420 L 210 480" stroke="#5e6ad2" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+        <path d="M 210 550 L 210 610" stroke="#7170ff" stroke-width="1.5" stroke-dasharray="4,3" fill="none" marker-end="url(#ar)"/>
+        <path d="M 210 680 L 210 720" stroke="#5e6ad2" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+      </svg>
+
+      <div class="node"        style="left:110px;top:20px; width:200px"><div class="nic">📥</div><div><div class="ntl">拉取代码</div><div class="nmt">git · alpine</div></div></div>
+      <div class="node mx"     style="left:60px; top:100px;width:90px"><div><div class="ntl" style="font-size:11px">🧪 go 1.21</div></div></div>
+      <div class="node mx"     style="left:165px;top:100px;width:90px"><div><div class="ntl" style="font-size:11px">🧪 go 1.22</div></div></div>
+      <div class="node mx sel" style="left:270px;top:100px;width:90px"><div><div class="ntl" style="font-size:11px">🧪 go 1.23</div></div></div>
+      <div class="node"        style="left:110px;top:230px;width:200px"><div class="nic">📦</div><div><div class="ntl">构建镜像</div><div class="nmt">kaniko</div></div></div>
+      <div class="node"        style="left:110px;top:360px;width:200px"><div class="nic">🛡</div><div><div class="ntl">安全扫描</div><div class="nmt">trivy · CRITICAL</div></div></div>
+      <div class="node"        style="left:110px;top:490px;width:200px"><div class="nic">☸</div><div><div class="ntl">部署 Staging</div><div class="nmt">staging-tke</div></div></div>
+      <div class="node ap"     style="left:110px;top:620px;width:200px"><div class="nic">✋</div><div><div class="ntl">人工审批</div><div class="nmt">alice, bob</div></div></div>
+      <div class="node"        style="left:110px;top:730px;width:200px"><div class="nic">🚀</div><div><div class="ntl">部署 生产</div><div class="nmt">aliyun-ack · Canary</div></div></div>
+
+      <div style="position:absolute;bottom:16px;right:16px;display:flex;flex-direction:column;gap:6px">
+        <button class="btn bsm" style="width:32px;padding:4px">+</button>
+        <button class="btn bsm" style="width:32px;padding:4px">−</button>
+        <button class="btn bsm" style="width:32px;padding:4px">⛶</button>
+      </div>
+      <div style="position:absolute;bottom:16px;left:16px" class="pill nu mono"><span class="d"></span>9 节点 · DAG 校验通过</div>
+     </div>
+    </div>
+
+    <aside style="border-left:1px solid var(--bs);padding:18px;overflow:auto">
+      <div class="nt" style="padding:0 0 6px">已选中节点</div>
+      <div class="row g2" style="margin-bottom:18px">
+        <div class="nic" style="width:32px;height:32px;font-size:16px">🧪</div>
+        <div><div style="font-size:14px;font-weight:590">单元测试 (matrix: go=1.23)</div><div class="mu mono" style="font-size:11px">stage_id: test</div></div>
+      </div>
+      <div class="fg"><label>名称</label><input type="text" value="单元测试"/></div>
+      <div class="fg"><label>执行器</label><select><option>container (推荐)</option><option>ssh</option><option>serverless</option></select></div>
+      <div class="fg"><label>容器镜像</label><input type="text" class="mono" value="golang:${{ matrix.go-version }}"/></div>
+      <div class="fg"><label>依赖阶段 (needs)</label><div class="row g2" style="flex-wrap:wrap"><span class="pill"><span class="d" style="background:#5e6ad2"></span>checkout ✕</span><button class="btn bsm bgh">+ 添加</button></div></div>
+      <div class="fg"><label>Matrix</label><div class="mono" style="background:rgba(255,255,255,0.02);border:1px solid var(--bd);border-radius:5px;padding:8px;font-size:11px;line-height:1.6;color:var(--t2)">go-version:<br>&nbsp;&nbsp;- "1.21"<br>&nbsp;&nbsp;- "1.22"<br>&nbsp;&nbsp;- "1.23"</div></div>
+      <div class="fg"><label>步骤 (run)</label><pre class="mono" style="background:rgba(255,255,255,0.02);border:1px solid var(--bd);border-radius:5px;padding:8px;font-size:11px;color:var(--t2);white-space:pre-wrap">- run: |
+    go mod download
+    go test ./... -race -cover</pre></div>
+      <div class="fg"><label>执行条件 (when)</label><input type="text" class="mono" value='branch != "draft/*"'/></div>
+      <div class="row g2" style="margin-top:20px">
+        <button class="btn bsm">复制</button>
+        <button class="btn bsm bgh" style="color:var(--dn)">删除</button>
+      </div>
+    </aside>
+
+  </div>
+
+  </div>
+</main>
+</div>
+</body>
+</html>

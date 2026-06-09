@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>执行 #247 — Helios</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+.rail{display:flex;align-items:center;gap:8px;min-width:max-content}
+.stg{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:130px}
+.stgd{width:14px;height:14px;border-radius:50%;background:var(--t4);border:2px solid var(--bg)}
+.stg.ok .stgd{background:var(--ok)}
+.stg.rn .stgd{background:#3b82f6;box-shadow:0 0 0 4px rgba(59,130,246,0.2);animation:pl 1.5s infinite}
+.stg.ap .stgd{background:var(--wn)}
+.stgl{font-size:11px;color:var(--t2);text-align:center;white-space:nowrap}
+.stg.pd .stgl{color:var(--t4)}
+.stgt{display:block;font-size:10px;color:var(--t4);margin-top:2px}
+.stgn{flex:1;height:2px;background:var(--t4);min-width:30px}
+.stgn.ok{background:var(--ok)}
+.stgn.dm{background:rgba(255,255,255,0.08)}
+.st-i{padding:6px 10px;font-size:12px;color:var(--t2);border-radius:5px;cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap}
+.st-i .tm{margin-left:auto;font-size:10px;color:var(--t4);font-family:'JetBrains Mono',monospace}
+.st-i:hover{background:rgba(255,255,255,0.03)}
+.st-i.ok{color:#86efac}
+.st-i.rn{color:#93c5fd}
+.st-i.pd{color:var(--t4)}
+.st-i.sel{background:rgba(94,106,210,0.15)}
+.st-i.ch{font-size:11px;padding-left:22px}
+.lg{flex:1;overflow:auto;padding:12px 16px;background:#050608;font-size:12px;line-height:1.7}
+.ln{display:flex;gap:14px;color:var(--t2);padding:1px 0}
+.ln:hover{background:rgba(255,255,255,0.02)}
+.lt{color:var(--t4);flex-shrink:0;font-family:'JetBrains Mono',monospace}
+.lm{white-space:pre-wrap;word-break:break-all;font-family:'JetBrains Mono',monospace}
+.ln.in .lm{color:#93c5fd}
+.ln.wn .lm{color:#fbbf24}
+.ln.ok .lm{color:#86efac}
+.cr{animation:bk 1s steps(1) infinite}
+@keyframes bk{50%{opacity:0}}
+</style>
+</head>
+<body>
+<div class="app">
+<aside class="sb">
+  <div class="logo"><div class="mark"></div><span>Helios</span></div>
+  <div class="org"><div class="av">A</div><span>Acme Inc.</span></div>
+  <div class="ns">
+    <div class="nt">工作区</div>
+    <div class="ni">📦 项目<span class="badge">12</span></div>
+    <div class="ni">🔀 流水线</div>
+    <div class="ni active">▶ 执行记录<span class="badge">3</span></div>
+  </div>
+  <div class="ns">
+    <div class="nt">基础设施</div>
+    <div class="ni">☸ 集群</div>
+    <div class="ni">🖥 主机</div>
+    <div class="ni">🔐 密钥</div>
+  </div>
+  <div class="ns">
+    <div class="nt">市场</div>
+    <div class="ni">🧩 插件</div>
+    <div class="ni">📋 模板</div>
+  </div>
+</aside>
+<main class="main">
+  <header class="tb">
+    <div class="bc"><span>Acme Inc.</span><span class="sp">/</span><span>api-gateway</span><span class="sp">/</span><span>执行记录</span><span class="sp">/</span><span class="cu">#247</span></div>
+    <div class="ta">
+      <div class="search"><span>搜索 / 命令</span><span class="kbd">⌘K</span></div>
+      <button class="btn bgh">🔔</button>
+      <div class="av" style="background:#5e6ad2">R</div>
+    </div>
+  </header>
+
+  <div class="ct" style="padding:0;display:flex;flex-direction:column">
+
+  <div style="padding:20px 24px 16px;border-bottom:1px solid var(--bs)">
+    <div class="row g2" style="margin-bottom:6px">
+      <span class="pill rn"><span class="d"></span>运行中</span>
+      <span class="mono" style="color:var(--t3);font-size:12px">#247</span>
+      <h1 style="font-size:18px;font-weight:590">build-and-deploy</h1>
+      <div class="row g2" style="margin-left:auto">
+        <button class="btn bsm">↻ 重新运行</button>
+        <button class="btn bsm" style="color:var(--dn);border-color:rgba(239,68,68,0.3)">⏹ 取消</button>
+      </div>
+    </div>
+    <div class="row g3" style="color:var(--t3);font-size:12px">
+      <span>🌿 <span class="mono">main</span></span>
+      <span>📦 <span class="mono">c8a4f2e</span></span>
+      <span>👤 alice</span>
+      <span>⏱ 开始 2分钟前 · 已运行 1m 47s</span>
+      <span>🎯 由 push 触发</span>
+    </div>
+  </div>
+
+  <div style="padding:16px 24px;border-bottom:1px solid var(--bs);overflow-x:auto">
+    <div class="rail">
+      <div class="stg ok"><span class="stgd"></span><div class="stgl">拉取代码<span class="stgt">12s</span></div></div>
+      <div class="stgn ok"></div>
+      <div class="stg ok"><span class="stgd"></span><div class="stgl">单元测试 (3 matrix)<span class="stgt">48s</span></div></div>
+      <div class="stgn ok"></div>
+      <div class="stg rn"><span class="stgd"></span><div class="stgl">构建镜像<span class="stgt">47s · 运行中</span></div></div>
+      <div class="stgn dm"></div>
+      <div class="stg pd"><span class="stgd"></span><div class="stgl">安全扫描<span class="stgt">等待</span></div></div>
+      <div class="stgn dm"></div>
+      <div class="stg pd"><span class="stgd"></span><div class="stgl">部署 Staging<span class="stgt">等待</span></div></div>
+      <div class="stgn dm"></div>
+      <div class="stg pd ap"><span class="stgd"></span><div class="stgl">人工审批<span class="stgt">需 alice/bob</span></div></div>
+      <div class="stgn dm"></div>
+      <div class="stg pd"><span class="stgd"></span><div class="stgl">部署生产<span class="stgt">等待</span></div></div>
+    </div>
+  </div>
+
+  <div style="flex:1;display:grid;grid-template-columns:280px 1fr;min-height:0">
+
+    <aside style="border-right:1px solid var(--bs);overflow:auto;padding:14px 10px">
+      <div class="nt" style="padding:0 8px 6px">阶段 / 步骤</div>
+      <div class="st-i ok">✓ 拉取代码<span class="tm">12s</span></div>
+      <div class="st-i ok">✓ 单元测试<span class="tm">48s</span></div>
+      <div class="st-i ch ok">✓ go 1.21<span class="tm">42s</span></div>
+      <div class="st-i ch ok">✓ go 1.22<span class="tm">45s</span></div>
+      <div class="st-i ch ok">✓ go 1.23<span class="tm">48s</span></div>
+      <div class="st-i rn">● 构建镜像<span class="tm">47s</span></div>
+      <div class="st-i ch ok">✓ docker login<span class="tm">2s</span></div>
+      <div class="st-i ch rn sel">● kaniko executor<span class="tm">45s</span></div>
+      <div class="st-i ch pd">○ push image<span class="tm">-</span></div>
+      <div class="st-i pd">○ 安全扫描<span class="tm">-</span></div>
+      <div class="st-i pd">○ 部署 Staging<span class="tm">-</span></div>
+      <div class="st-i pd">○ 人工审批<span class="tm">-</span></div>
+      <div class="st-i pd">○ 部署生产<span class="tm">-</span></div>
+    </aside>
+
+    <div style="display:flex;flex-direction:column;min-width:0">
+      <div class="row g2" style="padding:10px 16px;border-bottom:1px solid var(--bs);background:rgba(255,255,255,0.01)">
+        <span class="mono" style="font-size:12px">build › kaniko executor</span>
+        <span class="pill rn" style="margin-left:6px"><span class="d"></span>实时</span>
+        <div class="row g2" style="margin-left:auto">
+          <div class="search" style="min-width:160px;padding:3px 8px"><span style="font-size:11px">过滤日志...</span></div>
+          <button class="btn bsm bgh">⇣ 自动</button>
+          <button class="btn bsm bgh">⬇</button>
+          <button class="btn bsm bgh">⛶</button>
+        </div>
+      </div>
+
+      <div class="lg">
+        <div class="ln"><span class="lt">10:23:01.142</span><span class="lm">+ kaniko --dockerfile=Dockerfile --destination=ccr.tencentyun.com/acme/api:c8a4f2e</span></div>
+        <div class="ln in"><span class="lt">10:23:01.301</span><span class="lm">INFO[0000] Resolved base name golang:1.22-alpine to builder</span></div>
+        <div class="ln in"><span class="lt">10:23:01.512</span><span class="lm">INFO[0000] Retrieving image manifest golang:1.22-alpine</span></div>
+        <div class="ln in"><span class="lt">10:23:03.847</span><span class="lm">INFO[0002] Built cross stage deps: map[]</span></div>
+        <div class="ln in"><span class="lt">10:23:04.123</span><span class="lm">INFO[0002] Unpacking rootfs as cmd COPY . . requires it.</span></div>
+        <div class="ln wn"><span class="lt">10:23:18.432</span><span class="lm">WARN[0017] Failed to GET layer, retrying...</span></div>
+        <div class="ln in"><span class="lt">10:23:22.118</span><span class="lm">INFO[0021] RUN go mod download</span></div>
+        <div class="ln"><span class="lt">10:23:24.001</span><span class="lm">go: downloading github.com/gin-gonic/gin v1.10.0</span></div>
+        <div class="ln"><span class="lt">10:23:24.512</span><span class="lm">go: downloading github.com/google/uuid v1.6.0</span></div>
+        <div class="ln"><span class="lt">10:23:25.804</span><span class="lm">go: downloading gorm.io/gorm v1.25.10</span></div>
+        <div class="ln in"><span class="lt">10:23:31.420</span><span class="lm">INFO[0030] RUN go build -o /app ./cmd/api</span></div>
+        <div class="ln"><span class="lt">10:23:42.118</span><span class="lm">--&gt; Build complete (10.7s)</span></div>
+        <div class="ln in"><span class="lt">10:23:43.220</span><span class="lm">INFO[0042] Pushing image to ccr.tencentyun.com/acme/api:c8a4f2e</span></div>
+        <div class="ln"><span class="lt">10:23:46.512</span><span class="lm">2c5c4f7a8b91: Pushed</span></div>
+        <div class="ln"><span class="lt">10:23:46.821</span><span class="lm">9e8b1d4c2a31: Pushed</span></div>
+        <div class="ln ok"><span class="lt">10:23:48.044</span><span class="lm">✔ Successfully pushed ccr.tencentyun.com/acme/api:c8a4f2e (digest: sha256:8f4c...)</span></div>
+        <div class="ln"><span class="lt">10:23:48.500</span><span class="lm cr">▎</span></div>
+      </div>
+    </div>
+  </div>
+
+  </div>
+</main>
+</div>
+</body>
+</html>

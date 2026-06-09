@@ -1,0 +1,94 @@
+# Helios — 开发环境依赖一键拉起
+# 使用: docker compose -f deploy/docker/dev.compose.yml up -d
+# 或:  make dev-deps
+
+name: helios-dev
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: helios-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: helios
+      POSTGRES_PASSWORD: helios
+      POSTGRES_DB: helios
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      - "127.0.0.1:${HELIOS_PG_PORT:-5432}:5432"
+    volumes:
+      - helios-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U helios -d helios"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: helios-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "127.0.0.1:${HELIOS_REDIS_PORT:-6380}:6379"
+    volumes:
+      - helios-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: helios-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: admin12345
+    ports:
+      - "127.0.0.1:${HELIOS_S3_PORT:-9000}:9000"
+      - "127.0.0.1:${HELIOS_S3_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - helios-minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # MinIO 桶初始化 — 跑一次即退出
+  minio-init:
+    image: minio/mc:latest
+    container_name: helios-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 admin admin12345 &&
+      mc mb -p local/helios-artifacts || true &&
+      mc mb -p local/helios-logs || true &&
+      mc mb -p local/helios-audit || true &&
+      echo '✓ MinIO buckets ready'
+      "
+    restart: "no"
+
+  adminer:
+    image: adminer:latest
+    container_name: helios-adminer
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${HELIOS_ADMINER_PORT:-8082}:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+      ADMINER_DESIGN: nette
+
+volumes:
+  helios-pg-data:
+    name: helios-pg-data
+  helios-redis-data:
+    name: helios-redis-data
+  helios-minio-data:
+    name: helios-minio-data

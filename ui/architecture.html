@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Helios CI/CD — 系统架构图</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#020617;color:#e2e8f0;font-family:'JetBrains Mono',ui-monospace,Menlo,monospace;padding:32px;min-height:100vh}
+.header{margin-bottom:24px}
+.header h1{font-size:22px;font-weight:600;display:flex;align-items:center;gap:10px}
+.dot{width:10px;height:10px;background:#22d3ee;border-radius:50%;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.header .sub{color:#64748b;font-size:12px;margin-top:6px}
+.canvas{background:#0a0f1f;border:1px solid #1e293b;border-radius:12px;padding:16px;overflow:auto}
+svg{display:block;margin:0 auto}
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:24px}
+.card{background:#0a0f1f;border:1px solid #1e293b;border-radius:10px;padding:16px}
+.card-h{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.card-d{width:8px;height:8px;border-radius:50%}
+.card-d.c{background:#22d3ee}.card-d.e{background:#34d399}.card-d.a{background:#fbbf24}
+.card h3{font-size:13px;font-weight:600;color:#f1f5f9}
+.card ul{list-style:none;font-size:11px;color:#94a3b8;line-height:1.8}
+.footer{color:#475569;font-size:10px;margin-top:20px;text-align:center}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1><span class="dot"></span>Helios CI/CD — 系统架构</h1>
+  <div class="sub">多云原生 · 自托管混合 · 可视化流水线编排</div>
+</div>
+
+<div class="canvas">
+<svg width="1280" height="900" viewBox="0 0 1280 900" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+    </pattern>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+    </marker>
+    <marker id="arc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#22d3ee"/>
+    </marker>
+    <marker id="are" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#34d399"/>
+    </marker>
+  </defs>
+  <rect width="100%" height="100%" fill="url(#grid)"/>
+
+  <text x="20" y="80" fill="#475569" font-size="10">L1 · 接入层</text>
+  <text x="20" y="200" fill="#475569" font-size="10">L2 · 网关</text>
+  <text x="20" y="290" fill="#475569" font-size="10">L3 · 核心服务</text>
+  <text x="20" y="500" fill="#475569" font-size="10">L4 · 执行层</text>
+  <text x="20" y="640" fill="#475569" font-size="10">L5 · 数据层</text>
+  <text x="20" y="760" fill="#475569" font-size="10">L6 · 目标层</text>
+
+  <line x1="280" y1="120" x2="640" y2="190" stroke="#475569" stroke-width="1" marker-end="url(#ar)"/>
+  <line x1="640" y1="120" x2="640" y2="190" stroke="#475569" stroke-width="1" marker-end="url(#ar)"/>
+  <line x1="1000" y1="120" x2="640" y2="190" stroke="#475569" stroke-width="1" marker-end="url(#ar)"/>
+  <line x1="640" y1="250" x2="640" y2="300" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arc)"/>
+  <line x1="510" y1="380" x2="630" y2="380" stroke="#34d399" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="750" y1="380" x2="870" y2="380" stroke="#34d399" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="350" y1="470" x2="240" y2="530" stroke="#34d399" stroke-width="1.5" marker-end="url(#are)"/>
+  <line x1="540" y1="470" x2="480" y2="530" stroke="#34d399" stroke-width="1.5" marker-end="url(#are)"/>
+  <line x1="730" y1="470" x2="720" y2="530" stroke="#34d399" stroke-width="1.5" marker-end="url(#are)"/>
+  <line x1="920" y1="470" x2="960" y2="530" stroke="#34d399" stroke-width="1.5" marker-end="url(#are)"/>
+  <line x1="240" y1="470" x2="220" y2="650" stroke="#a78bfa" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="1080" y1="470" x2="1060" y2="650" stroke="#a78bfa" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="240" y1="600" x2="220" y2="780" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#ar)"/>
+  <line x1="480" y1="600" x2="500" y2="780" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#ar)"/>
+  <line x1="720" y1="600" x2="780" y2="780" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#ar)"/>
+  <line x1="960" y1="600" x2="1060" y2="780" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#ar)"/>
+
+  <g><rect x="180" y="60" width="200" height="60" rx="6" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+    <text x="280" y="88" text-anchor="middle" fill="#f1f5f9" font-size="12" font-weight="600">Web UI</text>
+    <text x="280" y="104" text-anchor="middle" fill="#94a3b8" font-size="9">Next.js · React Flow</text></g>
+  <g><rect x="540" y="60" width="200" height="60" rx="6" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+    <text x="640" y="88" text-anchor="middle" fill="#f1f5f9" font-size="12" font-weight="600">CLI (helios)</text>
+    <text x="640" y="104" text-anchor="middle" fill="#94a3b8" font-size="9">Go binary</text></g>
+  <g><rect x="900" y="60" width="200" height="60" rx="6" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+    <text x="1000" y="88" text-anchor="middle" fill="#f1f5f9" font-size="12" font-weight="600">OpenAPI</text>
+    <text x="1000" y="104" text-anchor="middle" fill="#94a3b8" font-size="9">REST · WebSocket · Webhook</text></g>
+
+  <g><rect x="380" y="190" width="520" height="60" rx="6" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+    <text x="640" y="218" text-anchor="middle" fill="#f1f5f9" font-size="12" font-weight="600">API Gateway</text>
+    <text x="640" y="236" text-anchor="middle" fill="#94a3b8" font-size="9">JWT/OIDC Auth · RBAC (Casbin) · Rate Limit · Audit</text></g>
+
+  <g><rect x="160" y="300" width="180" height="80" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+    <text x="250" y="328" text-anchor="middle" fill="#f1f5f9" font-size="12" font-weight="600">Project Service</text>
+    <text x="250" y="346" text-anchor="middle" fill="#94a3b8" font-size="9">仓库绑定 · 成员</text>
+    <text x="250" y="362" text-anchor="middle" fill="#94a3b8" font-size="9">RBAC · 凭据</text></g>
+  <g><rect x="360" y="300" width="180" height="80" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+    <text x="450" y="328" text-anchor="middle" fill="#f1f5f9" font-size="12" font-weight="600">Pipeline Engine</text>
+    <text x="450" y="346" text-anchor="middle" fill="#94a3b8" font-size="9">DSL 解析 · DAG 调度</text>
+    <text x="450" y="362" text-anchor="middle" fill="#94a3b8" font-size="9">触发器 · 审批</text></g>
+  <g><rect x="560" y="300" width="180" height="80" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+    <text x="650" y="328" text-anchor="middle" fill="#f1f5f9" font-size="12" font-weight="600">Runner Manager</text>
+    <text x="650" y="346" text-anchor="middle" fill="#94a3b8" font-size="9">分发 · 心跳</text>
+    <text x="650" y="362" text-anchor="middle" fill="#94a3b8" font-size="9">日志流</text></g>
+  <g><rect x="760" y="300" width="180" height="80" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+    <text x="850" y="328" text-anchor="middle" fill="#f1f5f9" font-size="12" font-weight="600">Deployment Svc</text>
+    <text x="850" y="346" text-anchor="middle" fill="#94a3b8" font-size="9">Rolling · Blue-Green</text>
+    <text x="850" y="362" text-anchor="middle" fill="#94a3b8" font-size="9">Canary · Rollback</text></g>
+  <g><rect x="960" y="300" width="180" height="80" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+    <text x="1050" y="328" text-anchor="middle" fill="#f1f5f9" font-size="12" font-weight="600">Cluster Service</text>
+    <text x="1050" y="346" text-anchor="middle" fill="#94a3b8" font-size="9">多云适配统一抽象</text>
+    <text x="1050" y="362" text-anchor="middle" fill="#94a3b8" font-size="9">健康检查</text></g>
+
+  <g><rect x="160" y="390" width="180" height="80" rx="6" fill="rgba(136,19,55,0.4)" stroke="#fb7185" stroke-width="1.5"/>
+    <text x="250" y="418" text-anchor="middle" fill="#f1f5f9" font-size="12" font-weight="600">Secret Vault</text>
+    <text x="250" y="436" text-anchor="middle" fill="#94a3b8" font-size="9">AES-256-GCM</text>
+    <text x="250" y="452" text-anchor="middle" fill="#94a3b8" font-size="9">KMS Envelope</text></g>
+  <g><rect x="360" y="390" width="180" height="80" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+    <text x="450" y="418" text-anchor="middle" fill="#f1f5f9" font-size="12" font-weight="600">Plugin Registry</text>
+    <text x="450" y="436" text-anchor="middle" fill="#94a3b8" font-size="9">官方/社区/私有插件</text>
+    <text x="450" y="452" text-anchor="middle" fill="#94a3b8" font-size="9">Container Action</text></g>
+  <g><rect x="560" y="390" width="180" height="80" rx="6" fill="rgba(251,146,60,0.3)" stroke="#fb923c" stroke-width="1.5"/>
+    <text x="650" y="418" text-anchor="middle" fill="#f1f5f9" font-size="12" font-weight="600">Trigger Service</text>
+    <text x="650" y="436" text-anchor="middle" fill="#94a3b8" font-size="9">Webhook · Cron</text>
+    <text x="650" y="452" text-anchor="middle" fill="#94a3b8" font-size="9">Manual · API</text></g>
+  <g><rect x="760" y="390" width="180" height="80" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+    <text x="850" y="418" text-anchor="middle" fill="#f1f5f9" font-size="12" font-weight="600">Notification Svc</text>
+    <text x="850" y="436" text-anchor="middle" fill="#94a3b8" font-size="9">钉钉 · 企微 · 飞书</text>
+    <text x="850" y="452" text-anchor="middle" fill="#94a3b8" font-size="9">Slack · Email</text></g>
+  <g><rect x="960" y="390" width="180" height="80" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+    <text x="1050" y="418" text-anchor="middle" fill="#f1f5f9" font-size="12" font-weight="600">Audit Service</text>
+    <text x="1050" y="436" text-anchor="middle" fill="#94a3b8" font-size="9">写操作全量</text>
+    <text x="1050" y="452" text-anchor="middle" fill="#94a3b8" font-size="9">密钥访问</text></g>
+
+  <g><rect x="160" y="530" width="200" height="70" rx="6" fill="rgba(120,53,15,0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+    <text x="260" y="558" text-anchor="middle" fill="#f1f5f9" font-size="12" font-weight="600">K8s Runner</text>
+    <text x="260" y="576" text-anchor="middle" fill="#94a3b8" font-size="9">Job Pod · 命名空间隔离</text></g>
+  <g><rect x="380" y="530" width="200" height="70" rx="6" fill="rgba(120,53,15,0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+    <text x="480" y="558" text-anchor="middle" fill="#f1f5f9" font-size="12" font-weight="600">Docker Runner</text>
+    <text x="480" y="576" text-anchor="middle" fill="#94a3b8" font-size="9">远程 daemon</text></g>
+  <g><rect x="600" y="530" width="200" height="70" rx="6" fill="rgba(120,53,15,0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+    <text x="700" y="558" text-anchor="middle" fill="#f1f5f9" font-size="12" font-weight="600">SSH Runner</text>
+    <text x="700" y="576" text-anchor="middle" fill="#94a3b8" font-size="9">物理机 · 主机组</text></g>
+  <g><rect x="820" y="530" width="200" height="70" rx="6" fill="rgba(120,53,15,0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+    <text x="920" y="558" text-anchor="middle" fill="#f1f5f9" font-size="12" font-weight="600">Serverless Runner</text>
+    <text x="920" y="576" text-anchor="middle" fill="#94a3b8" font-size="9">SCF · 函数计算</text></g>
+
+  <g><rect x="160" y="660" width="220" height="70" rx="6" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+    <text x="270" y="688" text-anchor="middle" fill="#f1f5f9" font-size="12" font-weight="600">PostgreSQL 15</text>
+    <text x="270" y="706" text-anchor="middle" fill="#94a3b8" font-size="9">业务数据 · JSONB pipeline spec</text></g>
+  <g><rect x="400" y="660" width="200" height="70" rx="6" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+    <text x="500" y="688" text-anchor="middle" fill="#f1f5f9" font-size="12" font-weight="600">Redis (Asynq)</text>
+    <text x="500" y="706" text-anchor="middle" fill="#94a3b8" font-size="9">任务队列 · 缓存 · WS pub/sub</text></g>
+  <g><rect x="620" y="660" width="220" height="70" rx="6" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+    <text x="730" y="688" text-anchor="middle" fill="#f1f5f9" font-size="12" font-weight="600">S3 / MinIO</text>
+    <text x="730" y="706" text-anchor="middle" fill="#94a3b8" font-size="9">日志归档 · 制品 · SBOM</text></g>
+  <g><rect x="860" y="660" width="200" height="70" rx="6" fill="rgba(136,19,55,0.4)" stroke="#fb7185" stroke-width="1.5"/>
+    <text x="960" y="688" text-anchor="middle" fill="#f1f5f9" font-size="12" font-weight="600">Vault / KMS</text>
+    <text x="960" y="706" text-anchor="middle" fill="#94a3b8" font-size="9">凭据加密 · KEK 托管</text></g>
+
+  <g><rect x="120" y="780" width="220" height="80" rx="6" fill="rgba(30,41,59,0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+    <text x="230" y="808" text-anchor="middle" fill="#f1f5f9" font-size="12" font-weight="600">自建 K8s</text>
+    <text x="230" y="824" text-anchor="middle" fill="#94a3b8" font-size="9">kubeconfig 上传</text>
+    <text x="230" y="840" text-anchor="middle" fill="#94a3b8" font-size="9">client-go</text></g>
+  <g><rect x="380" y="780" width="220" height="80" rx="6" fill="rgba(120,53,15,0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+    <text x="490" y="808" text-anchor="middle" fill="#f1f5f9" font-size="12" font-weight="600">腾讯云 TKE</text>
+    <text x="490" y="824" text-anchor="middle" fill="#94a3b8" font-size="9">CAM + STS</text>
+    <text x="490" y="840" text-anchor="middle" fill="#94a3b8" font-size="9">DescribeClusterKubeconfig</text></g>
+  <g><rect x="640" y="780" width="220" height="80" rx="6" fill="rgba(120,53,15,0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+    <text x="750" y="808" text-anchor="middle" fill="#f1f5f9" font-size="12" font-weight="600">阿里云 ACK</text>
+    <text x="750" y="824" text-anchor="middle" fill="#94a3b8" font-size="9">RAM + AK/SK</text>
+    <text x="750" y="840" text-anchor="middle" fill="#94a3b8" font-size="9">DescribeClusterUserKubeconfig</text></g>
+  <g><rect x="900" y="780" width="260" height="80" rx="6" fill="rgba(30,41,59,0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+    <text x="1030" y="808" text-anchor="middle" fill="#f1f5f9" font-size="12" font-weight="600">物理机 / VM 集群</text>
+    <text x="1030" y="824" text-anchor="middle" fill="#94a3b8" font-size="9">SSH · systemd · docker-compose</text>
+    <text x="1030" y="840" text-anchor="middle" fill="#94a3b8" font-size="9">主机组 inventory</text></g>
+</svg>
+</div>
+
+<div class="cards">
+  <div class="card">
+    <div class="card-h"><span class="card-d c"></span><h3>核心数据流</h3></div>
+    <ul>
+      <li>• Webhook/Cron → Trigger → Pipeline Engine</li>
+      <li>• 生成 Run → Asynq 队列 → Runner Manager</li>
+      <li>• Runner 执行 → 实时日志 → WebSocket 推送</li>
+      <li>• 完成后日志归档 MinIO</li>
+    </ul>
+  </div>
+  <div class="card">
+    <div class="card-h"><span class="card-d e"></span><h3>多云适配</h3></div>
+    <ul>
+      <li>• ClusterProvider 接口统一</li>
+      <li>• 自建/TKE/ACK 各自实现</li>
+      <li>• 凭据存 Vault,STS 自动刷新</li>
+      <li>• 部署策略: Rolling/B-G/Canary/Recreate</li>
+    </ul>
+  </div>
+  <div class="card">
+    <div class="card-h"><span class="card-d a"></span><h3>安全模型</h3></div>
+    <ul>
+      <li>• JWT + OIDC + PAT 多种认证</li>
+      <li>• Casbin RBAC 细粒度授权</li>
+      <li>• AES-256-GCM + KMS 信封加密</li>
+      <li>• K8s Runner 命名空间 + NetworkPolicy 隔离</li>
+    </ul>
+  </div>
+</div>
+
+<div class="footer">Helios CI/CD · 系统架构 v0.1 · Generated by Hermes Agent</div>
+</body>
+</html>

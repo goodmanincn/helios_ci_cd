@@ -1,0 +1,61 @@
+# Go
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+bin/
+dist/
+vendor/
+coverage.out
+coverage.html
+# 各子项目 go build ./... 默认输出
+/api/api
+/worker/worker
+/runner/runner
+/cli/helios
+
+# Node
+node_modules/
+.next/
+.turbo/
+.pnpm-store/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+secrets.yaml
+
+# Data (docker-compose 持久化)
+.data/
+data/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+build/
+out/
+target/
+
+# Helios runtime
+.helios/
+runs/
+workspaces/
