@@ -160,6 +160,28 @@ test-go:  ## Go 单元测试 (含覆盖率)
 test-web:  ## Web 测试
 	@test -d web && cd web && pnpm test 2>/dev/null || echo "(web 测试尚未配置,跳过)"
 
+# === E2E ===
+.PHONY: e2e-git-prepare
+e2e-git-prepare:  ## 准备本地 e2e git repo (/tmp/helios-e2e-bare)
+	@rm -rf /tmp/helios-e2e-repo /tmp/helios-e2e-bare
+	@mkdir -p /tmp/helios-e2e-repo
+	@cd /tmp/helios-e2e-repo && git init -q -b master && \
+		git config user.email "e2e@helios.local" && \
+		git config user.name "e2e" && \
+		echo "# Hello-World (helios e2e)" > README.md && \
+		echo "test content" > hello.txt && \
+		git add -A && git commit -qm "init"
+	@git clone --bare -q /tmp/helios-e2e-repo /tmp/helios-e2e-bare
+	@echo "✓ e2e bare repo @ /tmp/helios-e2e-bare HEAD=$$(git -C /tmp/helios-e2e-bare rev-parse master)"
+	@printf 'e2e-secret' > /tmp/wh_secret.txt
+	@echo "✓ webhook secret @ /tmp/wh_secret.txt (= e2e-secret)"
+	@echo "→ 提示: 把项目 1 的 repo_url 指到本地 bare repo:"
+	@echo "   docker exec helios-postgres psql -U helios -d helios -c \"UPDATE projects SET repo_url='/tmp/helios-e2e-bare', default_branch='master' WHERE id=1;\""
+
+.PHONY: e2e-git
+e2e-git: e2e-git-prepare  ## 跑 T1.2.3 端到端 (webhook -> worker clone -> workspace 出代码)
+	@HELIOS_WH_FILE=/tmp/wh_secret.txt python3 scripts/e2e_git_checkout.py
+
 # === 构建 ===
 .PHONY: build
 build: build-go build-web  ## 全部构建
