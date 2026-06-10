@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"flag"
 	"log"
@@ -26,6 +27,7 @@ import (
 	"github.com/helios-cicd/helios/api/internal/middleware"
 	"github.com/helios-cicd/helios/api/internal/repository"
 	"github.com/helios-cicd/helios/api/internal/service"
+	heliosCrypto "github.com/helios-cicd/helios/api/pkg/crypto"
 	"github.com/helios-cicd/helios/api/pkg/git"
 	heliosjwt "github.com/helios-cicd/helios/api/pkg/jwt"
 	"github.com/helios-cicd/helios/api/pkg/logarchive"
@@ -91,6 +93,9 @@ func main() {
 	}
 	runMachine := runstate.New(sqlDB)
 	projectH := handler.NewProjectHandlerWithQueue(projectSvc, enq)
+
+	// vault: 优先 HELIOS_KEK_BASE64 (32 字节 base64), 没配则 nil (secrets API 返 503)
+	vault := buildVault(os.Getenv("HELIOS_KEK_BASE64"), os.Getenv("HELIOS_KEK_ID"))
 	gh := git.NewGitHubProvider(git.GitHubConfig{
 		Token: os.Getenv("HELIOS_GITHUB_TOKEN"), // 可空,目前 webhook 接收不需要 token
 	})
@@ -141,6 +146,7 @@ func main() {
 	handler.NewRunHandler(gdb).WithRunControl(runMachine, enq).Register(protected)
 	handler.NewMeHandler(gdb).Register(protected)
 	handler.NewPipelineHandler().Register(protected)
+	handler.NewSecretHandler(gdb, vault).Register(protected)
 
 	addr := os.Getenv("HELIOS_API_ADDR")
 	if addr == "" {
@@ -272,4 +278,39 @@ func corsMiddleware() gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+// buildVault 从 env 构造 secrets vault.
+//
+// 期望:
+//   HELIOS_KEK_BASE64 = 32 字节 raw key 的 base64 (44 字符含尾 ==)
+//   HELIOS_KEK_ID     = KEK 标识 (可空, 默认 "v1"); rotation 时把旧 KEK 也加进 vault
+//
+// 缺失 / 不合法时返 nil + 日志警告; secrets API 在 vault=nil 时返 503.
+// 这样 dev 默认能起来 (不强制配 KEK), 真正用 secrets 功能时再配.
+func buildVault(b64, id string) *heliosCrypto.Vault {
+	if b64 == "" {
+		log.Printf("[vault] HELIOS_KEK_BASE64 not set, secrets API will return 503")
+		return nil
+	}
+	if id == "" {
+		id = "v1"
+	}
+	key, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		log.Printf("[vault] HELIOS_KEK_BASE64 decode failed: %v", err)
+		return nil
+	}
+	kek, err := heliosCrypto.NewKEK(id, key)
+	if err != nil {
+		log.Printf("[vault] NewKEK: %v", err)
+		return nil
+	}
+	v, err := heliosCrypto.NewVault(kek)
+	if err != nil {
+		log.Printf("[vault] NewVault: %v", err)
+		return nil
+	}
+	log.Printf("[vault] initialized with KEK id=%s", id)
+	return v
 }

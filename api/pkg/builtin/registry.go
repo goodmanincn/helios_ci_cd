@@ -30,7 +30,10 @@ import (
 //   - StageID   当前 stage id (含 matrix suffix)
 //   - WorkDir   workspace 根目录 (一般是 /tmp/helios/runs/<run>/src)
 //   - Storage   artifact storage (LocalFS / S3 等)
-//   - Log       日志输出 (writer; 写到 step.log + 推 SSE)
+//   - Log       日志输出 (writer; 写到 step.log + 推 SSE); 真实 worker 会用 masker.Writer
+//                包一层把 Secrets 的值替换成 *** (T2.5.4 即可生效)
+//   - Secrets   stage.secrets 声明的 NAME → 明文 map (worker 在执行前调
+//                handler.ResolveSecrets 解出来塞这里; builtin/shell step 拿来注入 env)
 type ExecContext struct {
 	Ctx     context.Context
 	RunID   int64
@@ -38,6 +41,7 @@ type ExecContext struct {
 	WorkDir string
 	Storage artifact.Storage
 	Log     io.Writer
+	Secrets map[string]string
 }
 
 // Step 一个内置 step 的执行器。
