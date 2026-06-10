@@ -13,6 +13,7 @@ import {
   updateProject,
 } from "@/lib/projects-api";
 import { ApiException } from "@/lib/api";
+import { RunListItem, fmtDuration, fmtTime, listRuns, shortSHA, statusBadgeColor } from "@/lib/runs-api";
 
 export default function ProjectDetailPage() {
   return (
@@ -184,12 +185,7 @@ function ProjectDetailInner() {
               )}
             </Row>
 
-            <div
-              className="mt-4 p-4 rounded-md text-xs"
-              style={{ background: "var(--bg-elev-2)", border: "1px dashed var(--border-strong)", color: "var(--fg-dim)" }}
-            >
-              ⓘ Webhook、流水线、运行记录在后续 milestone (M1.2 起) 接入。
-            </div>
+            <RecentRunsCard projectId={project.id} />
           </div>
         )}
       </div>
@@ -208,4 +204,87 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 
 function fmt(s: string): string {
   try { return new Date(s).toLocaleString(); } catch { return s; }
+}
+
+// RecentRunsCard — 显示该 project 最近 5 条 run, 链到执行记录列表
+function RecentRunsCard({ projectId }: { projectId: number }) {
+  const accessToken = useAuthStore((s) => s.accessToken);
+  const [items, setItems] = useState<RunListItem[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!accessToken) return;
+    let alive = true;
+    (async () => {
+      try {
+        const r = await listRuns(accessToken, { project_id: projectId, limit: 5 });
+        if (alive) setItems(r.items);
+      } catch (e) {
+        if (alive) setErr(e instanceof ApiException ? e.message : String(e));
+      }
+    })();
+    return () => { alive = false; };
+  }, [accessToken, projectId]);
+
+  return (
+    <div
+      className="mt-4 p-4 rounded-md"
+      style={{ background: "var(--bg-elev-2)", border: "1px solid var(--border)" }}
+    >
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-sm font-semibold" style={{ color: "var(--fg)" }}>最近运行</div>
+        <Link
+          href={`/runs?project_id=${projectId}`}
+          className="text-xs hover:underline"
+          style={{ color: "var(--accent)" }}
+        >
+          查看全部 →
+        </Link>
+      </div>
+      {err && <div className="err-msg text-xs">{err}</div>}
+      {items == null && !err && (
+        <div className="text-xs" style={{ color: "var(--fg-dim)" }}>加载中...</div>
+      )}
+      {items && items.length === 0 && (
+        <div className="text-xs" style={{ color: "var(--fg-dim)" }}>暂无执行记录</div>
+      )}
+      {items && items.length > 0 && (
+        <div className="flex flex-col gap-1">
+          {items.map((it) => {
+            const c = statusBadgeColor(it.status);
+            return (
+              <Link
+                key={it.id}
+                href={`/runs/${it.id}`}
+                className="flex items-center gap-3 px-2 py-1.5 rounded"
+                style={{ background: "var(--bg-elev)", fontSize: "0.8125rem" }}
+              >
+                <span style={{ color: "var(--accent)", fontWeight: 600, minWidth: 40 }}>
+                  #{it.number}
+                </span>
+                <span
+                  style={{
+                    color: c.fg,
+                    background: c.bg,
+                    padding: "1px 8px",
+                    borderRadius: 999,
+                    fontSize: "0.7rem",
+                    fontWeight: 600,
+                  }}
+                >
+                  {c.label}
+                </span>
+                <code style={{ color: "var(--fg-mute)", fontSize: "0.75rem" }}>
+                  {it.branch || "-"}@{shortSHA(it.commit_sha)}
+                </code>
+                <span className="ml-auto text-xs" style={{ color: "var(--fg-dim)" }}>
+                  {fmtDuration(it.duration_ms)} · {fmtTime(it.started_at || it.created_at)}
+                </span>
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }

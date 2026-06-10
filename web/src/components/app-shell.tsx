@@ -15,6 +15,7 @@ interface NavSpec {
 const NAV: NavSpec[] = [
   { href: "/dashboard", label: "仪表盘", icon: "◐", enabled: true },
   { href: "/projects", label: "项目", icon: "◇", enabled: true },
+  { href: "/runs", label: "执行记录", icon: "▶", enabled: true },
   { href: "/pipelines", label: "流水线", icon: "∿", enabled: false },
   { href: "/clusters", label: "集群", icon: "◆", enabled: false },
   { href: "/hosts", label: "主机", icon: "□", enabled: false },

@@ -57,5 +57,10 @@ target/
 
 # Helios runtime
 .helios/
-runs/
-workspaces/
+/runs/
+/workspaces/
+# 防御性: 一些 sandbox/runtime 目录也可能在子树里
+**/.helios-workspaces/
+# 显式不忽略前端路由 app/runs (页面源码, 与 runtime runs 同名)
+!web/src/app/runs/
+!web/src/app/runs/**
