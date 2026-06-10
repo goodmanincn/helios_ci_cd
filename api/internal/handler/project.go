@@ -1,25 +1,37 @@
+// Package handler ...
 package handler
 
 import (
 	"errors"
+	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/helios-cicd/helios/api/internal/middleware"
+	"github.com/helios-cicd/helios/api/internal/model"
 	"github.com/helios-cicd/helios/api/internal/repository"
 	"github.com/helios-cicd/helios/api/internal/service"
+	"github.com/helios-cicd/helios/api/pkg/queue"
+	"github.com/helios-cicd/helios/api/pkg/tasks"
 )
 
 // ProjectHandler 项目 REST 端点。
 type ProjectHandler struct {
 	svc *service.ProjectService
+	enq queue.Enqueuer // 可空 (旧测试路径), 生产路径必传
 }
 
 func NewProjectHandler(svc *service.ProjectService) *ProjectHandler {
 	return &ProjectHandler{svc: svc}
+}
+
+// NewProjectHandlerWithQueue 携带 enqueuer 的构造, 用于触发 webhook 自动注册等异步任务。
+func NewProjectHandlerWithQueue(svc *service.ProjectService, enq queue.Enqueuer) *ProjectHandler {
+	return &ProjectHandler{svc: svc, enq: enq}
 }
 
 // Register 在 /api/v1/projects 下挂载所有路由(调用方负责加 RequireAuth)。
@@ -155,7 +167,74 @@ func (h *ProjectHandler) create(c *gin.Context) {
 		projectErr(c, err)
 		return
 	}
+
+	// 创建成功后异步注册 webhook (仅 github, 失败不影响创建结果)
+	h.enqueueWebhookRegister(c, p)
+
 	c.JSON(http.StatusCreated, p)
+}
+
+// enqueueWebhookRegister 在项目创建/更新后投递 webhook 注册任务。
+// 失败仅打日志, 不影响主流程; 重试与最终失败状态由 worker 写回 project.config。
+func (h *ProjectHandler) enqueueWebhookRegister(c *gin.Context, p *model.Project) {
+	if h.enq == nil {
+		return
+	}
+	if p.RepoType != "github" {
+		return // 当前只支持 github 自动注册
+	}
+	owner, repo, ok := parseOwnerRepoFromURL(p.RepoURL)
+	if !ok {
+		log.Printf("[project] cannot parse owner/repo from %q, skip webhook register", p.RepoURL)
+		return
+	}
+	taskID, err := h.enq.EnqueueWebhookRegister(c.Request.Context(), &tasks.WebhookRegisterPayload{
+		ProjectID: p.ID,
+		RepoURL:   p.RepoURL,
+		Owner:     owner,
+		Repo:      repo,
+	})
+	if err != nil {
+		log.Printf("[project] enqueue webhook register failed: project_id=%d err=%v", p.ID, err)
+		return
+	}
+	log.Printf("[project] webhook register enqueued: project_id=%d owner=%s repo=%s task_id=%s",
+		p.ID, owner, repo, taskID)
+}
+
+// parseOwnerRepoFromURL 从仓库 URL 解析 owner / repo。支持:
+//   - https://github.com/octocat/Hello-World[.git]
+//   - git@github.com:octocat/Hello-World.git
+//   - ssh://git@github.com/octocat/Hello-World.git
+//   - 本地路径 (返回 false, 让上层跳过)
+func parseOwnerRepoFromURL(raw string) (owner, repo string, ok bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", "", false
+	}
+	// scp-like: git@host:owner/repo.git
+	if strings.HasPrefix(raw, "git@") && strings.Contains(raw, ":") {
+		idx := strings.Index(raw, ":")
+		path := strings.TrimPrefix(raw[idx+1:], "/")
+		return splitOwnerRepo(path)
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", "", false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" && u.Scheme != "ssh" {
+		return "", "", false
+	}
+	return splitOwnerRepo(strings.TrimPrefix(u.Path, "/"))
+}
+
+func splitOwnerRepo(path string) (owner, repo string, ok bool) {
+	path = strings.TrimSuffix(strings.TrimSuffix(path, "/"), ".git")
+	parts := strings.SplitN(path, "/", 3)
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
 }
 
 func (h *ProjectHandler) get(c *gin.Context) {

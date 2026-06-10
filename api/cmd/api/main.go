@@ -77,12 +77,12 @@ func main() {
 	projectSvc := service.NewProjectService(repository.NewProjectRepository(gdb))
 	store := authstore.New(rdb)
 	authH := handler.NewAuthHandler(userSvc, issuer, store, gdb)
-	projectH := handler.NewProjectHandler(projectSvc)
+	enq := queue.New(os.Getenv("HELIOS_REDIS_ADDR"))
+	defer func() { _ = enq.Close() }()
+	projectH := handler.NewProjectHandlerWithQueue(projectSvc, enq)
 	gh := git.NewGitHubProvider(git.GitHubConfig{
 		Token: os.Getenv("HELIOS_GITHUB_TOKEN"), // 可空,目前 webhook 接收不需要 token
 	})
-	enq := queue.New(os.Getenv("HELIOS_REDIS_ADDR"))
-	defer func() { _ = enq.Close() }()
 	webhookH := webhookh.NewGitHubHandler(webhookh.NewGormRunStore(gdb), gh, enq, os.Getenv("HELIOS_WEBHOOK_DEV_SECRET"))
 	authMW := middleware.RequireAuth(middleware.AuthDeps{Issuer: issuer, Authstore: store})
 

@@ -13,6 +13,8 @@ import (
 	"github.com/hibiken/asynq"
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	"github.com/helios-cicd/helios/api/pkg/git"
+	"github.com/helios-cicd/helios/api/pkg/projectrepo"
 	"github.com/helios-cicd/helios/api/pkg/runrepo"
 	"github.com/helios-cicd/helios/api/pkg/tasks"
 	"github.com/helios-cicd/helios/worker/internal/gitrunner"
@@ -48,6 +50,17 @@ func main() {
 	repo := runrepo.New(db)
 	checkoutH := handler.NewCheckout(repo, gitrunner.NewShell(), workspaceDir)
 
+	projRepo := projectrepo.New(db)
+	ghProvider := git.NewGitHubProvider(git.GitHubConfig{
+		Token: os.Getenv("HELIOS_GITHUB_TOKEN"),
+	})
+	webhookRegH := handler.NewWebhookRegister(
+		projRepo,
+		ghProvider,
+		os.Getenv("HELIOS_PUBLIC_API_BASE"),
+		os.Getenv("HELIOS_WEBHOOK_DEV_SECRET"),
+	)
+
 	// === Asynq server ===
 	srv := asynq.NewServer(
 		asynq.RedisClientOpt{Addr: redisAddr},
@@ -74,6 +87,9 @@ func main() {
 	// 用 wrapper 在 retry 用尽时调 handler 的 OnRetryExhausted
 	mux.Handle(tasks.TypeGitCheckout, withExhaustHook(checkoutH, func(ctx context.Context, t *asynq.Task, err error) {
 		checkoutH.OnRetryExhausted(ctx, t, err)
+	}))
+	mux.Handle(tasks.TypeWebhookRegister, withExhaustHook(webhookRegH, func(ctx context.Context, t *asynq.Task, err error) {
+		webhookRegH.OnRetryExhausted(ctx, t, err)
 	}))
 
 	// === 启动 + signal ===

@@ -19,6 +19,7 @@ import (
 // Enqueuer 抽象 enqueue 行为,handler 依赖接口便于测试。
 type Enqueuer interface {
 	EnqueueGitCheckout(ctx context.Context, p *tasks.GitCheckoutPayload) (taskID string, err error)
+	EnqueueWebhookRegister(ctx context.Context, p *tasks.WebhookRegisterPayload) (taskID string, err error)
 	Close() error
 }
 
@@ -52,6 +53,29 @@ func (e *AsynqEnqueuer) EnqueueGitCheckout(ctx context.Context, p *tasks.GitChec
 		asynq.MaxRetry(3),
 		asynq.Timeout(5*time.Minute),
 		asynq.Retention(24*time.Hour), // 完成后保留 1d 便于排障
+	)
+	info, err := e.client.EnqueueContext(ctx, t)
+	if err != nil {
+		return "", err
+	}
+	return info.ID, nil
+}
+
+// EnqueueWebhookRegister 把 webhook 注册任务入队 (default 队列, 最多重试 5 次,
+// 单任务超时 30 秒, 完成后保留 7 天用于排查注册失败)。
+func (e *AsynqEnqueuer) EnqueueWebhookRegister(ctx context.Context, p *tasks.WebhookRegisterPayload) (string, error) {
+	if err := p.Validate(); err != nil {
+		return "", fmt.Errorf("payload: %w", err)
+	}
+	body, err := p.Marshal()
+	if err != nil {
+		return "", err
+	}
+	t := asynq.NewTask(tasks.TypeWebhookRegister, body,
+		asynq.Queue(tasks.QueueDefault),
+		asynq.MaxRetry(5),
+		asynq.Timeout(30*time.Second),
+		asynq.Retention(7*24*time.Hour),
 	)
 	info, err := e.client.EnqueueContext(ctx, t)
 	if err != nil {

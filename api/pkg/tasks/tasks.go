@@ -20,6 +20,11 @@ const (
 	// 触发: webhook 收到 push 后,run 落库 status=pending,立刻入队。
 	// Handler: worker/internal/handler/checkout.go
 	TypeGitCheckout = "helios:git:checkout"
+
+	// TypeWebhookRegister 在目标仓库上自动注册 webhook。
+	// 触发: 项目创建成功后 handler 入队 (异步,不阻塞 HTTP)。
+	// Handler: worker/internal/handler/registerwebhook.go
+	TypeWebhookRegister = "helios:project:webhook-register"
 )
 
 // GitCheckoutPayload helios:git:checkout 的 payload。
@@ -61,6 +66,40 @@ func UnmarshalGitCheckout(data []byte) (*GitCheckoutPayload, error) {
 	}
 	if err := p.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid git_checkout payload: %w", err)
+	}
+	return &p, nil
+}
+
+// WebhookRegisterPayload helios:project:webhook-register 的 payload。
+// owner/repo 从 repo_url 提取传入,减少 worker 解析负担。
+type WebhookRegisterPayload struct {
+	ProjectID int64  `json:"project_id"`
+	RepoURL   string `json:"repo_url"`  // 原始 repo URL,worker 可选二次校验
+	Owner     string `json:"owner"`
+	Repo      string `json:"repo"`
+}
+
+func (p *WebhookRegisterPayload) Validate() error {
+	if p.ProjectID <= 0 {
+		return fmt.Errorf("project_id required")
+	}
+	if p.Owner == "" || p.Repo == "" {
+		return fmt.Errorf("owner and repo required")
+	}
+	return nil
+}
+
+func (p *WebhookRegisterPayload) Marshal() ([]byte, error) {
+	return json.Marshal(p)
+}
+
+func UnmarshalWebhookRegister(data []byte) (*WebhookRegisterPayload, error) {
+	var p WebhookRegisterPayload
+	if err := json.Unmarshal(data, &p); err != nil {
+		return nil, fmt.Errorf("unmarshal webhook_register: %w", err)
+	}
+	if err := p.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid webhook_register payload: %w", err)
 	}
 	return &p, nil
 }
