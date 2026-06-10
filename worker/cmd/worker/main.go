@@ -12,8 +12,10 @@ import (
 
 	"github.com/hibiken/asynq"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/helios-cicd/helios/api/pkg/git"
+	"github.com/helios-cicd/helios/api/pkg/logstream"
 	"github.com/helios-cicd/helios/api/pkg/projectrepo"
 	"github.com/helios-cicd/helios/api/pkg/queue"
 	"github.com/helios-cicd/helios/api/pkg/runrepo"
@@ -64,8 +66,14 @@ func main() {
 	}
 	projRepo := projectrepo.New(db)
 
+	// T1.5.1: 日志流写入器 (Redis Stream, 与 asynq 共用 redis).
+	logsRedis := redis.NewClient(&redis.Options{Addr: redisAddr})
+	defer func() { _ = logsRedis.Close() }()
+	logsWriter := logstream.NewWriter(logsRedis, logstream.Config{MaxLen: 10000})
+	log.Printf("worker logstream redis=%s maxlen=10000", redisAddr)
+
 	// runtime 选择: HELIOS_BUILD_RUNTIME = host (默认) | docker
-	buildOpts := []handler.BuildOption{}
+	buildOpts := []handler.BuildOption{handler.WithLogStream(logsWriter)}
 	runtime := envOr("HELIOS_BUILD_RUNTIME", "host")
 	switch runtime {
 	case "docker":

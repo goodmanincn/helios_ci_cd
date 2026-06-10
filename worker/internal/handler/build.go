@@ -20,6 +20,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -33,6 +34,7 @@ import (
 
 	"github.com/hibiken/asynq"
 
+	"github.com/helios-cicd/helios/api/pkg/logstream"
 	"github.com/helios-cicd/helios/api/pkg/projectrepo"
 	"github.com/helios-cicd/helios/api/pkg/runstate"
 	"github.com/helios-cicd/helios/api/pkg/tasks"
@@ -59,6 +61,8 @@ type BuildHandler struct {
 
 	runtime  BuildRuntime
 	executor *dockerrun.Executor // runtime=docker 时必填; runtime=host 时可 nil
+
+	logs *logstream.Writer // T1.5.1: 双写 Redis Stream, nil 时仅写本地 build.log
 }
 
 // BuildOption 配置项。
@@ -70,6 +74,12 @@ func WithDockerRuntime(ex *dockerrun.Executor) BuildOption {
 		h.runtime = BuildRuntimeDocker
 		h.executor = ex
 	}
+}
+
+// WithLogStream 注入日志流写入器, build 时每行 stdout/stderr 双写 Redis Stream + build.log。
+// 不传 → 只写本地 build.log (向后兼容)。
+func WithLogStream(w *logstream.Writer) BuildOption {
+	return func(h *BuildHandler) { h.logs = w }
 }
 
 // NewBuild 构造。workspaceDir 与 checkout handler 必须一致。
@@ -164,6 +174,12 @@ func (h *BuildHandler) ProcessTask(ctx context.Context, t *asynq.Task) error {
 	runCtx, cancel := context.WithTimeout(ctx, h.timeout)
 	defer cancel()
 
+	// T1.5.1 双写日志: build.log + Redis Stream (Writer 为 nil 时 sink 自动跳过).
+	if h.logs != nil {
+		h.logs.AppendSystem(ctx, p.RunID,
+			fmt.Sprintf("build runtime=%s cmd=%q", h.runtime, buildCmd))
+	}
+
 	var exitCode int
 	var timedOut bool
 	var image string
@@ -177,6 +193,9 @@ func (h *BuildHandler) ProcessTask(ctx context.Context, t *asynq.Task) error {
 		}
 		log.Printf("build: run_id=%d runtime=docker image=%s cmd=%q wsDir=%s log=%s",
 			p.RunID, image, buildCmd, wsDir, logPath)
+		if h.logs != nil {
+			h.logs.AppendSystem(ctx, p.RunID, "docker image="+image)
+		}
 		exitCode, timedOut, err = h.runDocker(runCtx, p, buildCmd, wsDir, image, logFile)
 
 	default: // host
@@ -222,6 +241,9 @@ func (h *BuildHandler) ProcessTask(ctx context.Context, t *asynq.Task) error {
 			return fmt.Errorf("mark failed: %w", mErr)
 		}
 		log.Printf("build: run_id=%d FAILED exit=%d", p.RunID, exitCode)
+		if h.logs != nil {
+			h.logs.AppendSystem(ctx, p.RunID, "[FAILED] "+reason)
+		}
 		return nil // 不重试: user-command 错
 	}
 
@@ -230,6 +252,9 @@ func (h *BuildHandler) ProcessTask(ctx context.Context, t *asynq.Task) error {
 		return fmt.Errorf("mark success: %w", mErr)
 	}
 	log.Printf("build: run_id=%d SUCCESS", p.RunID)
+	if h.logs != nil {
+		h.logs.AppendSystem(ctx, p.RunID, "[SUCCESS] build_command succeeded")
+	}
 	return nil
 }
 
@@ -239,8 +264,14 @@ func (h *BuildHandler) ProcessTask(ctx context.Context, t *asynq.Task) error {
 func (h *BuildHandler) runHost(ctx context.Context, p *tasks.RunBuildPayload, buildCmd, wsDir string, logFile io.Writer) (int, bool, error) {
 	cmd := exec.CommandContext(ctx, "bash", "-c", buildCmd)
 	cmd.Dir = wsDir
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
+	// T1.5.1: stdout/stderr 分别走 logFile + Redis Stream (按行切).
+	if h.logs != nil {
+		cmd.Stdout = io.MultiWriter(logFile, newLineStreamWriter(ctx, h.logs, p.RunID, logstream.StreamStdout))
+		cmd.Stderr = io.MultiWriter(logFile, newLineStreamWriter(ctx, h.logs, p.RunID, logstream.StreamStderr))
+	} else {
+		cmd.Stdout = logFile
+		cmd.Stderr = logFile
+	}
 	cmd.Env = append(os.Environ(),
 		fmt.Sprintf("HELIOS_RUN_ID=%d", p.RunID),
 		fmt.Sprintf("HELIOS_PROJECT_ID=%d", p.ProjectID),
@@ -271,7 +302,7 @@ func (h *BuildHandler) runHost(ctx context.Context, p *tasks.RunBuildPayload, bu
 }
 
 // runDocker 在容器内跑 build_command。workspace bind mount 到 /workspace, workdir=/workspace。
-// dockerrun.Executor 已经处理 stdcopy 拆 stdout/stderr, 这里把两条流都拼回 logFile。
+// dockerrun.Executor 已经处理 stdcopy 拆 stdout/stderr, 这里把两条流都拼回 logFile + Redis。
 func (h *BuildHandler) runDocker(ctx context.Context, p *tasks.RunBuildPayload, buildCmd, wsDir, image string, logFile io.Writer) (int, bool, error) {
 	if h.executor == nil {
 		return -1, false, errors.New("docker runtime requires executor (build with WithDockerRuntime)")
@@ -283,6 +314,14 @@ func (h *BuildHandler) runDocker(ctx context.Context, p *tasks.RunBuildPayload, 
 
 	sink := func(l dockerrun.LogLine) error {
 		_, _ = fmt.Fprintf(logFile, "%s\n", l.Line)
+		// T1.5.1: dockerrun 已按行切, stream 名直接映射 stdout|stderr.
+		if h.logs != nil {
+			stream := logstream.StreamStdout
+			if l.Stream == dockerrun.LogStderr {
+				stream = logstream.StreamStderr
+			}
+			h.logs.Append(ctx, p.RunID, stream, l.Line)
+		}
 		return nil
 	}
 
@@ -315,4 +354,41 @@ func (h *BuildHandler) runDocker(ctx context.Context, p *tasks.RunBuildPayload, 
 		return res.ExitCode, false, runErr
 	}
 	return res.ExitCode, false, nil
+}
+
+// lineStreamWriter 是 io.Writer, 把传入字节按 \n 切行后 forward 到 logstream.Writer.
+// 用于 host 路径 (exec.Cmd.Stdout/Stderr) 的逐行 redis 推送.
+// 未换行的尾巴留在 buffer, 下次 Write 拼上; Close 时 flush 剩余.
+type lineStreamWriter struct {
+	ctx    context.Context
+	w      *logstream.Writer
+	runID  int64
+	stream string
+	buf    []byte
+}
+
+func newLineStreamWriter(ctx context.Context, w *logstream.Writer, runID int64, stream string) *lineStreamWriter {
+	return &lineStreamWriter{ctx: ctx, w: w, runID: runID, stream: stream, buf: make([]byte, 0, 4096)}
+}
+
+// Write 实现 io.Writer; 永远返回 len(p), nil (不阻塞 cmd 的 stdout pipe).
+func (l *lineStreamWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	l.buf = append(l.buf, p...)
+	for {
+		i := bytes.IndexByte(l.buf, '\n')
+		if i < 0 {
+			break
+		}
+		line := l.buf[:i]
+		// 去尾部 \r (Windows CRLF)
+		if n := len(line); n > 0 && line[n-1] == '\r' {
+			line = line[:n-1]
+		}
+		l.w.Append(l.ctx, l.runID, l.stream, string(line))
+		l.buf = l.buf[i+1:]
+	}
+	return len(p), nil
 }
