@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 
 import { useAuthStore } from "@/lib/auth-store";
 import { AuthGuard } from "@/components/auth-guard";
@@ -20,9 +20,11 @@ import {
   RunDetail,
   Stage,
   Step,
+  cancelRun,
   fmtDuration,
   fmtTime,
   getRun,
+  retryRun,
   shortSHA,
   statusBadgeColor,
 } from "@/lib/runs-api";
@@ -37,12 +39,15 @@ export default function RunDetailPage() {
 
 function RunDetailInner() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const accessToken = useAuthStore((s) => s.accessToken);
   const id = Number(params?.id);
 
   const [run, setRun] = useState<RunDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [actionErr, setActionErr] = useState<string | null>(null);
+  const [acting, setActing] = useState<"cancel" | "retry" | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const load = useCallback(async () => {
@@ -57,6 +62,36 @@ function RunDetailInner() {
       setLoading(false);
     }
   }, [accessToken, id]);
+
+  const onCancel = useCallback(async () => {
+    if (!accessToken || !run) return;
+    if (!window.confirm(`确认取消运行 #${run.number}?`)) return;
+    setActing("cancel");
+    setActionErr(null);
+    try {
+      await cancelRun(accessToken, run.id);
+      await load();
+    } catch (e) {
+      setActionErr(e instanceof ApiException ? e.message : String(e));
+    } finally {
+      setActing(null);
+    }
+  }, [accessToken, run, load]);
+
+  const onRetry = useCallback(async () => {
+    if (!accessToken || !run) return;
+    if (!window.confirm(`复制运行 #${run.number} 并重新执行?`)) return;
+    setActing("retry");
+    setActionErr(null);
+    try {
+      const res = await retryRun(accessToken, run.id);
+      // 跳转到新 run 详情
+      router.push(`/runs/${res.id}`);
+    } catch (e) {
+      setActionErr(e instanceof ApiException ? e.message : String(e));
+      setActing(null);
+    }
+  }, [accessToken, run, router]);
 
   useEffect(() => {
     // 初始化 fetch — react-hooks/set-state-in-effect 误报, 列表页这是合理模式
@@ -89,7 +124,13 @@ function RunDetailInner() {
 
         {run && !loading && (
           <div className="flex flex-col gap-4">
-            <RunMetaCard run={run} />
+            <RunMetaCard
+              run={run}
+              onCancel={onCancel}
+              onRetry={onRetry}
+              acting={acting}
+              actionErr={actionErr}
+            />
             <StagesCard stages={run.stages} runStatus={run.status} />
             {accessToken && (
               <LogsPanel runId={run.id} token={accessToken} runStatus={run.status} />
@@ -137,7 +178,22 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-function RunMetaCard({ run }: { run: RunDetail }) {
+function RunMetaCard({
+  run,
+  onCancel,
+  onRetry,
+  acting,
+  actionErr,
+}: {
+  run: RunDetail;
+  onCancel: () => void;
+  onRetry: () => void;
+  acting: "cancel" | "retry" | null;
+  actionErr: string | null;
+}) {
+  const isInFlight = run.status === "pending" || run.status === "running";
+  const isTerminal =
+    run.status === "success" || run.status === "failed" || run.status === "canceled";
   return (
     <div className="card flex flex-col gap-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -153,6 +209,37 @@ function RunMetaCard({ run }: { run: RunDetail }) {
         <div className="text-xs text-right" style={{ color: "var(--fg-dim)" }}>
           ID {run.id} · pipeline {run.pipeline_id} · v{run.version_id}
         </div>
+      </div>
+
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={!isInFlight || acting !== null}
+          className="btn-action"
+          data-variant="warn"
+          title={isInFlight ? "取消运行" : "仅 pending/running 可取消"}
+        >
+          {acting === "cancel" ? "取消中..." : "取消"}
+        </button>
+        <button
+          type="button"
+          onClick={onRetry}
+          disabled={!isTerminal || acting !== null}
+          className="btn-action"
+          data-variant="primary"
+          title={isTerminal ? "复制并重新执行" : "仅终态 run 可重试"}
+        >
+          {acting === "retry" ? "提交中..." : "重试"}
+        </button>
+        {actionErr && (
+          <span
+            className="text-xs"
+            style={{ color: "#fb7185" }}
+          >
+            {actionErr}
+          </span>
+        )}
       </div>
 
       <div
@@ -185,6 +272,31 @@ function RunMetaCard({ run }: { run: RunDetail }) {
           padding: 2px 8px;
           border-radius: 3px;
           font-size: 0.8125rem;
+        }
+        .btn-action {
+          padding: 4px 12px;
+          border-radius: 4px;
+          font-size: 0.8125rem;
+          border: 1px solid var(--border);
+          background: var(--bg-elev-2);
+          color: var(--fg);
+          cursor: pointer;
+          transition: background 0.15s, opacity 0.15s;
+        }
+        .btn-action:hover:not(:disabled) {
+          background: var(--bg-elev);
+        }
+        .btn-action:disabled {
+          opacity: 0.4;
+          cursor: not-allowed;
+        }
+        .btn-action[data-variant="primary"]:not(:disabled) {
+          border-color: rgba(96, 165, 250, 0.4);
+          color: #60a5fa;
+        }
+        .btn-action[data-variant="warn"]:not(:disabled) {
+          border-color: rgba(251, 113, 133, 0.4);
+          color: #fb7185;
         }
       `}</style>
     </div>

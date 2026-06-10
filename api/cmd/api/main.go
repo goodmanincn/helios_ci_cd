@@ -31,6 +31,7 @@ import (
 	"github.com/helios-cicd/helios/api/pkg/logarchive"
 	"github.com/helios-cicd/helios/api/pkg/logstream"
 	"github.com/helios-cicd/helios/api/pkg/queue"
+	"github.com/helios-cicd/helios/api/pkg/runstate"
 )
 
 // Version 通过 ldflags 注入,默认 dev
@@ -82,6 +83,13 @@ func main() {
 	authH := handler.NewAuthHandler(userSvc, issuer, store, gdb)
 	enq := queue.New(os.Getenv("HELIOS_REDIS_ADDR"))
 	defer func() { _ = enq.Close() }()
+
+	// runstate.Machine 需要原生 *sql.DB (走 SELECT ... FOR UPDATE 事务)
+	sqlDB, dbErr := gdb.DB()
+	if dbErr != nil {
+		log.Fatalf("get *sql.DB from gorm: %v", dbErr)
+	}
+	runMachine := runstate.New(sqlDB)
 	projectH := handler.NewProjectHandlerWithQueue(projectSvc, enq)
 	gh := git.NewGitHubProvider(git.GitHubConfig{
 		Token: os.Getenv("HELIOS_GITHUB_TOKEN"), // 可空,目前 webhook 接收不需要 token
@@ -130,7 +138,7 @@ func main() {
 	protected := v1.Group("")
 	protected.Use(authMW)
 	projectH.Register(protected)
-	handler.NewRunHandler(gdb).Register(protected)
+	handler.NewRunHandler(gdb).WithRunControl(runMachine, enq).Register(protected)
 
 	addr := os.Getenv("HELIOS_API_ADDR")
 	if addr == "" {

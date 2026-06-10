@@ -1,39 +1,67 @@
-// Package handler — run 详情/列表 REST (T1.6.1)。
+// Package handler — run 详情/列表 REST (T1.6.1) + cancel/retry (T1.6.4)。
 //
 // 设计:
 //   - 用 GORM 走读 (内部 model.Run/Stage/Step), 不走 runrepo (那是 worker 写仓储)
 //   - 详情一次性返回 run + project 摘要 + stages[].steps[] 嵌套树, 避免前端多次往返
 //   - 列表轻量, 不含日志大小估算; 支持 ?project_id= / ?branch= / ?status= / ?limit=
+//   - cancel: 调 runstate.Machine.MarkCanceled, 状态机自身保证幂等 + 非法转换返错
+//     真正 docker kill 留给 worker 端的 ctx 取消传播 (M1 dev 简化, M2 加 control-plane signal)
+//   - retry: 复刻 webhook CreateRunForPush 的事务套路, 新建 run + 入队 git_checkout
+//     新 run 沿用原 pipeline/version/branch/commit, number=pipeline 内 max+1, trigger_type=retry
 //   - 通过 RequireAuth, 当前未做 org 级过滤 (M1 简化: 任何登录用户可读所有 run, 配合内网部署)
 package handler
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 
+	"github.com/helios-cicd/helios/api/internal/middleware"
 	"github.com/helios-cicd/helios/api/internal/model"
+	"github.com/helios-cicd/helios/api/pkg/runstate"
+	"github.com/helios-cicd/helios/api/pkg/tasks"
 )
+
+// Enqueuer 只取 RunHandler 需要的子集 (避免拉整个 queue.Enqueuer)。
+// api/cmd/api main.go 装配真实 AsynqEnqueuer 时它已自动满足。
+type Enqueuer interface {
+	EnqueueGitCheckout(ctx context.Context, p *tasks.GitCheckoutPayload) (taskID string, err error)
+}
 
 // RunHandler runs 资源端点。
 type RunHandler struct {
-	db *gorm.DB
+	db      *gorm.DB
+	machine *runstate.Machine // 可空 → cancel 返 503
+	enq     Enqueuer          // 可空 → retry 返 503
 }
 
-// NewRunHandler 构造。
+// NewRunHandler 构造。machine/enq 都可空 (T1.6.1 阶段只读取时调用方传 nil)。
 func NewRunHandler(db *gorm.DB) *RunHandler {
 	return &RunHandler{db: db}
+}
+
+// WithRunControl 注入 cancel/retry 所需依赖, 返回自身以支持链式。
+func (h *RunHandler) WithRunControl(m *runstate.Machine, enq Enqueuer) *RunHandler {
+	h.machine = m
+	h.enq = enq
+	return h
 }
 
 // Register 挂到 /api/v1, 调用方加 RequireAuth。
 func (h *RunHandler) Register(g *gin.RouterGroup) {
 	g.GET("/runs", h.list)
 	g.GET("/runs/:id", h.detail)
+	g.POST("/runs/:id/cancel", h.cancel)
+	g.POST("/runs/:id/retry", h.retry)
 }
 
 // ===== DTO (前端使用, 字段命名 snake_case) =====
@@ -229,6 +257,167 @@ func (h *RunHandler) detail(c *gin.Context) {
 		Stages:         stageDTOs,
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+// ===== cancel (T1.6.4) =====
+
+// POST /api/v1/runs/:id/cancel
+// 调 runstate.MarkCanceled, 状态机已保证幂等 + 非法转换返错。
+// 真正 docker kill 由 worker 端按 ctx 取消传播 (M1 简化, M2 加 control signal)。
+func (h *RunHandler) cancel(c *gin.Context) {
+	rid, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || rid <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid run id"})
+		return
+	}
+	if h.machine == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "run control not configured"})
+		return
+	}
+	ctx := c.Request.Context()
+
+	// 先确认 run 存在 + 拿当前状态返回给前端 (兼容幂等场景)
+	var run model.Run
+	if err := h.db.WithContext(ctx).Select("id", "status").First(&run, rid).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "run not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 鉴权后 actor 取 uid 拼到 reason 让 audit_logs 看得到
+	actor := "user"
+	if v, ok := c.Get(middleware.CtxUserIDKey); ok {
+		actor = fmt.Sprintf("uid=%v", v)
+	}
+
+	if err := h.machine.MarkCanceled(ctx, rid, runstate.TransitionOpts{
+		Reason: "canceled by " + actor,
+	}); err != nil {
+		// 终态 run 重复取消 → 返 409 让 UI 友好提示
+		if errors.Is(err, runstate.ErrTerminal) {
+			c.JSON(http.StatusConflict, gin.H{
+				"error":  "run already in terminal state",
+				"status": run.Status,
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"id":     rid,
+		"status": "canceled",
+	})
+}
+
+// ===== retry (T1.6.4) =====
+
+// POST /api/v1/runs/:id/retry
+// 在事务里新建 run (复用原 pipeline/version/branch/commit, number=max+1, trigger_type=retry),
+// 然后入队 git_checkout。原 run 不动。
+func (h *RunHandler) retry(c *gin.Context) {
+	rid, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || rid <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid run id"})
+		return
+	}
+	if h.enq == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "enqueuer not configured"})
+		return
+	}
+	ctx := c.Request.Context()
+
+	// 1. 读原 run
+	var src model.Run
+	if err := h.db.WithContext(ctx).First(&src, rid).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "run not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	// 只允许 retry 已经停下来的 run (避免重复触发)
+	if src.Status == "pending" || src.Status == "running" {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":  "run still in flight; cancel first",
+			"status": src.Status,
+		})
+		return
+	}
+
+	// 2. 查 pipeline 拿 project_id (后续算 number + checkout 入队都要)
+	var pipeline model.Pipeline
+	if err := h.db.WithContext(ctx).First(&pipeline, src.PipelineID).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "load pipeline: " + err.Error()})
+		return
+	}
+	var project model.Project
+	if err := h.db.WithContext(ctx).First(&project, pipeline.ProjectID).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "load project: " + err.Error()})
+		return
+	}
+
+	// 3. 事务: max number + 1 → 落新 run
+	var newRunID int64
+	var newRunNumber int
+	tdJSON := datatypes.JSON([]byte(fmt.Sprintf(`{"source":"retry","origin_run_id":%d}`, src.ID)))
+	err = h.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var maxN int
+		if err := tx.Model(&model.Run{}).
+			Where("pipeline_id = ?", pipeline.ID).
+			Select("COALESCE(MAX(number), 0)").
+			Row().Scan(&maxN); err != nil {
+			return fmt.Errorf("max run number: %w", err)
+		}
+		newRunNumber = maxN + 1
+		nr := model.Run{
+			PipelineID:  pipeline.ID,
+			VersionID:   src.VersionID,
+			Number:      newRunNumber,
+			Status:      "pending",
+			TriggerType: "retry",
+			TriggerData: tdJSON,
+			CommitSHA:   src.CommitSHA,
+			Branch:      src.Branch,
+			Message:     src.Message,
+			CreatedAt:   time.Now(),
+		}
+		if err := tx.Create(&nr).Error; err != nil {
+			return fmt.Errorf("insert run: %w", err)
+		}
+		newRunID = nr.ID
+		return nil
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 4. 入队 (失败不回滚 run, 落审计后让用户在 UI 看错误, 与 webhook 一致)
+	taskID, eqErr := h.enq.EnqueueGitCheckout(ctx, &tasks.GitCheckoutPayload{
+		RunID:     newRunID,
+		ProjectID: project.ID,
+		RepoURL:   project.RepoURL,
+		Branch:    src.Branch,
+		CommitSHA: src.CommitSHA,
+	})
+	if eqErr != nil {
+		log.Printf("enqueue git_checkout for retry failed: run_id=%d origin=%d err=%v",
+			newRunID, src.ID, eqErr)
+	}
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"id":            newRunID,
+		"number":        newRunNumber,
+		"status":        "pending",
+		"origin_run_id": src.ID,
+		"task_id":       taskID,
+	})
 }
 
 // ===== helpers =====

@@ -87,6 +87,34 @@ export async function getRun(token: string, id: number): Promise<RunDetail> {
   return apiFetch<RunDetail>(`/api/v1/runs/${id}`, { token });
 }
 
+// cancel/retry (T1.6.4) — POST 操作, 返回新状态摘要
+export interface CancelResult {
+  id: number;
+  status: string;
+}
+
+export async function cancelRun(token: string, id: number): Promise<CancelResult> {
+  return apiFetch<CancelResult>(`/api/v1/runs/${id}/cancel`, {
+    token,
+    method: "POST",
+  });
+}
+
+export interface RetryResult {
+  id: number; // 新 run id
+  number: number; // 新 run number
+  status: string; // "pending"
+  origin_run_id: number;
+  task_id?: string;
+}
+
+export async function retryRun(token: string, id: number): Promise<RetryResult> {
+  return apiFetch<RetryResult>(`/api/v1/runs/${id}/retry`, {
+    token,
+    method: "POST",
+  });
+}
+
 // ===== UI helpers =====
 
 export function statusBadgeColor(s: string): { fg: string; bg: string; label: string } {
