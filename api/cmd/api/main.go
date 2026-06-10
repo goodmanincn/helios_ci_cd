@@ -28,6 +28,7 @@ import (
 	"github.com/helios-cicd/helios/api/internal/service"
 	"github.com/helios-cicd/helios/api/pkg/git"
 	heliosjwt "github.com/helios-cicd/helios/api/pkg/jwt"
+	"github.com/helios-cicd/helios/api/pkg/logarchive"
 	"github.com/helios-cicd/helios/api/pkg/logstream"
 	"github.com/helios-cicd/helios/api/pkg/queue"
 )
@@ -86,7 +87,16 @@ func main() {
 		Token: os.Getenv("HELIOS_GITHUB_TOKEN"), // 可空,目前 webhook 接收不需要 token
 	})
 	webhookH := webhookh.NewGitHubHandler(webhookh.NewGormRunStore(gdb), gh, enq, os.Getenv("HELIOS_WEBHOOK_DEV_SECRET"))
-	logsH := logsh.New(logstream.NewReader(rdb), issuer)
+
+	// T1.5.3/4: 日志归档 fallback. backend 与 worker 共享路径.
+	archiveRoot := envOr("HELIOS_LOG_ARCHIVE_DIR", "/tmp/helios/logs")
+	archiveSvc := &logarchive.Service{
+		Reader:  logstream.NewReader(rdb),
+		Writer:  logstream.NewWriter(rdb, logstream.Config{}),
+		Backend: logarchive.NewLocalFS(archiveRoot),
+	}
+	logsH := logsh.New(logstream.NewReader(rdb), issuer, logsh.WithArchive(archiveSvc))
+	log.Printf("api logarchive backend=localfs root=%s", archiveRoot)
 	authMW := middleware.RequireAuth(middleware.AuthDeps{Issuer: issuer, Authstore: store})
 
 	// ===== 路由 =====

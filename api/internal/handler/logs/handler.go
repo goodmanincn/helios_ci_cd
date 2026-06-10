@@ -24,26 +24,43 @@ package logs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/helios-cicd/helios/api/pkg/jwt"
+	"github.com/helios-cicd/helios/api/pkg/logarchive"
 	"github.com/helios-cicd/helios/api/pkg/logstream"
 )
 
-// Handler 日志接入入口, 持有 Reader + 可选 jwt issuer.
+// Handler 日志接入入口, 持有 Reader + 可选 jwt issuer + 可选 archive (T1.5.4 fallback).
 type Handler struct {
-	Reader *logstream.Reader
-	Issuer *jwt.Issuer // 可空: 不校 token
+	Reader  *logstream.Reader
+	Archive *logarchive.Service // 可空: redis 没数据时不查归档
+	Issuer  *jwt.Issuer         // 可空: 不校 token
 }
 
 // New 构造.
-func New(r *logstream.Reader, iss *jwt.Issuer) *Handler {
-	return &Handler{Reader: r, Issuer: iss}
+func New(r *logstream.Reader, iss *jwt.Issuer, opts ...Option) *Handler {
+	h := &Handler{Reader: r, Issuer: iss}
+	for _, o := range opts {
+		o(h)
+	}
+	return h
+}
+
+// Option 配置项.
+type Option func(*Handler)
+
+// WithArchive 配置归档 fallback (T1.5.4).
+func WithArchive(a *logarchive.Service) Option {
+	return func(h *Handler) { h.Archive = a }
 }
 
 // Register 挂到 /api/v1 group 下.
@@ -53,8 +70,9 @@ func (h *Handler) Register(r *gin.RouterGroup) {
 	g.GET("/stream", h.stream)  // T1.5.2
 }
 
-// history GET /api/v1/runs/:id/logs?from=<id>&count=<n>
-// 返回 {entries:[...], next:"<id>", has_more:bool}.
+// history GET /api/v1/runs/:id/logs?from=<id>&count=<n>&source=auto|redis|archive
+// 返回 {entries:[...], next:"<id>", has_more:bool, source:"redis|archive"}.
+// source=auto (默认): 先查 redis, 0 条则查 archive.
 func (h *Handler) history(c *gin.Context) {
 	runID, ok := parseRunID(c)
 	if !ok {
@@ -69,11 +87,76 @@ func (h *Handler) history(c *gin.Context) {
 	if count <= 0 || count > 1000 {
 		count = 200
 	}
-	entries, err := h.Reader.ReadRange(c.Request.Context(), runID, from, count+1)
+	source := c.DefaultQuery("source", "auto")
+
+	// 1) Redis 优先
+	if source == "auto" || source == "redis" {
+		entries, err := h.Reader.ReadRange(c.Request.Context(), runID, from, count+1)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if len(entries) > 0 || source == "redis" {
+			respondHistory(c, entries, count, "redis")
+			return
+		}
+	}
+
+	// 2) Archive fallback (run 终态后 redis 已删)
+	if h.Archive == nil {
+		respondHistory(c, nil, count, "redis")
+		return
+	}
+	all, err := h.Archive.ReadAll(c.Request.Context(), runID)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) || os.IsNotExist(err) {
+			// 既无 redis 也无归档 → 空集 (200)
+			respondHistory(c, nil, count, "archive")
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	// archive 是 ndjson 全集, 按 from / count 切
+	entries := sliceEntriesFrom(all, from, count+1)
+	respondHistory(c, entries, count, "archive")
+}
+
+// sliceEntriesFrom 从 archive 全集里取 from 之后的最多 limit 条.
+// from 为空 / "0-0" → 从头; 否则跳过 <= from 的, 取之后的 limit 条.
+// from 前缀 "(" 表示 exclusive (与 redis XRANGE 一致), 不带前缀也按 exclusive 处理 (与 Reader.ReadRange "(<id>" 等价).
+func sliceEntriesFrom(all []logstream.Entry, from string, limit int64) []logstream.Entry {
+	if len(all) == 0 {
+		return nil
+	}
+	if from == "" || from == "0-0" {
+		if int64(len(all)) > limit {
+			return all[:limit]
+		}
+		return all
+	}
+	target := from
+	if len(target) > 0 && target[0] == '(' {
+		target = target[1:]
+	}
+	start := 0
+	for i, e := range all {
+		if e.ID == target {
+			start = i + 1
+			break
+		}
+	}
+	if start >= len(all) {
+		return nil
+	}
+	end := start + int(limit)
+	if end > len(all) {
+		end = len(all)
+	}
+	return all[start:end]
+}
+
+func respondHistory(c *gin.Context, entries []logstream.Entry, count int64, source string) {
 	hasMore := int64(len(entries)) > count
 	if hasMore {
 		entries = entries[:count]
@@ -81,6 +164,7 @@ func (h *Handler) history(c *gin.Context) {
 	resp := gin.H{
 		"entries":  toDTOs(entries),
 		"has_more": hasMore,
+		"source":   source,
 	}
 	if len(entries) > 0 {
 		resp["next"] = entries[len(entries)-1].ID

@@ -15,6 +15,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	logsh "github.com/helios-cicd/helios/api/internal/handler/logs"
+	"github.com/helios-cicd/helios/api/pkg/logarchive"
 	"github.com/helios-cicd/helios/api/pkg/logstream"
 )
 
@@ -45,6 +46,23 @@ func newServer(t *testing.T, rdb *redis.Client) *httptest.Server {
 	r := gin.New()
 	v1 := r.Group("/api/v1")
 	logsh.New(logstream.NewReader(rdb), nil).Register(v1)
+	srv := httptest.NewServer(r)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// newServerWithArchive 携带 archive fallback 的 server, 用于 T1.5.4 测试.
+func newServerWithArchive(t *testing.T, rdb *redis.Client, root string) *httptest.Server {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	v1 := r.Group("/api/v1")
+	svc := &logarchive.Service{
+		Reader:  logstream.NewReader(rdb),
+		Writer:  logstream.NewWriter(rdb, logstream.Config{}),
+		Backend: logarchive.NewLocalFS(root),
+	}
+	logsh.New(logstream.NewReader(rdb), nil, logsh.WithArchive(svc)).Register(v1)
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)
 	return srv
@@ -123,6 +141,119 @@ func TestHistory_BadRunID(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status=%d want 400", resp.StatusCode)
+	}
+}
+
+// T1.5.4: redis 没数据 + archive 有 → 回退归档.
+func TestHistory_FallbackToArchive(t *testing.T) {
+	rdb := requireRedis(t)
+	w := logstream.NewWriter(rdb, logstream.Config{})
+	r := logstream.NewReader(rdb)
+	rid := freshRunID(t)
+	defer func() { _ = rdb.Del(context.Background(), logstream.StreamKey(rid)).Err() }()
+
+	ctx := context.Background()
+	for i := 0; i < 4; i++ {
+		w.Append(ctx, rid, logstream.StreamStdout, "archived-"+itoa(i))
+	}
+	root := t.TempDir()
+	svc := &logarchive.Service{Reader: r, Writer: w, Backend: logarchive.NewLocalFS(root)}
+	if _, err := svc.ArchiveAndDrop(ctx, rid); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	// 确认 redis 已空
+	if n, _ := w.Len(ctx, rid); n != 0 {
+		t.Fatalf("redis not drained: n=%d", n)
+	}
+
+	srv := newServerWithArchive(t, rdb, root)
+
+	// auto 模式 (默认) → fallback 到 archive
+	resp, err := http.Get(srv.URL + "/api/v1/runs/" + itoa64(rid) + "/logs")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+	var body struct {
+		Entries []struct{ Line, Stream string } `json:"entries"`
+		Source  string                           `json:"source"`
+		HasMore bool                             `json:"has_more"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Source != "archive" {
+		t.Errorf("source=%s want archive", body.Source)
+	}
+	if len(body.Entries) != 4 {
+		t.Fatalf("entries=%d want 4", len(body.Entries))
+	}
+	if body.Entries[0].Line != "archived-0" || body.Entries[3].Line != "archived-3" {
+		t.Errorf("lines: %+v", body.Entries)
+	}
+	if body.HasMore {
+		t.Errorf("has_more=true want false")
+	}
+}
+
+// source=redis 强制走 redis, 没数据就返回空 entries (不 fallback).
+func TestHistory_SourceRedisOnly(t *testing.T) {
+	rdb := requireRedis(t)
+	w := logstream.NewWriter(rdb, logstream.Config{})
+	r := logstream.NewReader(rdb)
+	rid := freshRunID(t)
+	defer func() { _ = rdb.Del(context.Background(), logstream.StreamKey(rid)).Err() }()
+	ctx := context.Background()
+	w.Append(ctx, rid, logstream.StreamStdout, "x")
+	root := t.TempDir()
+	svc := &logarchive.Service{Reader: r, Writer: w, Backend: logarchive.NewLocalFS(root)}
+	_, _ = svc.ArchiveAndDrop(ctx, rid)
+
+	srv := newServerWithArchive(t, rdb, root)
+	resp, err := http.Get(srv.URL + "/api/v1/runs/" + itoa64(rid) + "/logs?source=redis")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		Entries []any  `json:"entries"`
+		Source  string `json:"source"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+	if body.Source != "redis" {
+		t.Errorf("source=%s want redis", body.Source)
+	}
+	if len(body.Entries) != 0 {
+		t.Errorf("entries=%d want 0", len(body.Entries))
+	}
+}
+
+// 既没 redis 也没 archive → 200 空集.
+func TestHistory_NotFoundAnywhere(t *testing.T) {
+	rdb := requireRedis(t)
+	root := t.TempDir()
+	srv := newServerWithArchive(t, rdb, root)
+	resp, err := http.Get(srv.URL + "/api/v1/runs/" + itoa64(freshRunID(t)) + "/logs")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+	var body struct {
+		Entries []any  `json:"entries"`
+		Source  string `json:"source"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+	if len(body.Entries) != 0 {
+		t.Errorf("entries=%d want 0", len(body.Entries))
+	}
+	if body.Source != "archive" {
+		t.Errorf("source=%s want archive (fallback path)", body.Source)
 	}
 }
 
