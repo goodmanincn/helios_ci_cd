@@ -25,6 +25,10 @@ const (
 	// 触发: 项目创建成功后 handler 入队 (异步,不阻塞 HTTP)。
 	// Handler: worker/internal/handler/registerwebhook.go
 	TypeWebhookRegister = "helios:project:webhook-register"
+
+	// TypeRunBuild T1.3.2 简化执行引擎: 在 checkout 后的 workspace 跑 project.build_command。
+	// MVP 阶段直接 host bash 执行, E1.4 接 Docker 后替换为容器执行。
+	TypeRunBuild = "helios:run:build"
 )
 
 // GitCheckoutPayload helios:git:checkout 的 payload。
@@ -100,6 +104,36 @@ func UnmarshalWebhookRegister(data []byte) (*WebhookRegisterPayload, error) {
 	}
 	if err := p.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid webhook_register payload: %w", err)
+	}
+	return &p, nil
+}
+
+// RunBuildPayload helios:run:build 的 payload。
+// 引擎在 checkout 成功后入队,build handler 读取 project.config.build_command 在 workspace 跑命令。
+type RunBuildPayload struct {
+	RunID     int64 `json:"run_id"`
+	ProjectID int64 `json:"project_id"`
+}
+
+func (p *RunBuildPayload) Validate() error {
+	if p.RunID <= 0 {
+		return fmt.Errorf("run_id required")
+	}
+	if p.ProjectID <= 0 {
+		return fmt.Errorf("project_id required")
+	}
+	return nil
+}
+
+func (p *RunBuildPayload) Marshal() ([]byte, error) { return json.Marshal(p) }
+
+func UnmarshalRunBuild(data []byte) (*RunBuildPayload, error) {
+	var p RunBuildPayload
+	if err := json.Unmarshal(data, &p); err != nil {
+		return nil, fmt.Errorf("unmarshal run_build: %w", err)
+	}
+	if err := p.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid run_build payload: %w", err)
 	}
 	return &p, nil
 }

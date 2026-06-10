@@ -15,7 +15,9 @@ import (
 
 	"github.com/helios-cicd/helios/api/pkg/git"
 	"github.com/helios-cicd/helios/api/pkg/projectrepo"
+	"github.com/helios-cicd/helios/api/pkg/queue"
 	"github.com/helios-cicd/helios/api/pkg/runrepo"
+	"github.com/helios-cicd/helios/api/pkg/runstate"
 	"github.com/helios-cicd/helios/api/pkg/tasks"
 	"github.com/helios-cicd/helios/worker/internal/gitrunner"
 	"github.com/helios-cicd/helios/worker/internal/handler"
@@ -48,9 +50,19 @@ func main() {
 
 	// === 处理器 ===
 	repo := runrepo.New(db)
-	checkoutH := handler.NewCheckout(repo, gitrunner.NewShell(), workspaceDir)
+	enq := queue.New(redisAddr)
+	defer func() { _ = enq.Close() }()
+	checkoutH := handler.NewCheckout(repo, gitrunner.NewShell(), workspaceDir, enq)
 
+	machine := runstate.New(db)
+	buildTimeout := 5 * time.Minute
+	if v := os.Getenv("HELIOS_BUILD_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			buildTimeout = d
+		}
+	}
 	projRepo := projectrepo.New(db)
+	buildH := handler.NewBuild(projRepo, machine, workspaceDir, buildTimeout)
 	ghProvider := git.NewGitHubProvider(git.GitHubConfig{
 		Token: os.Getenv("HELIOS_GITHUB_TOKEN"),
 	})
@@ -90,6 +102,13 @@ func main() {
 	}))
 	mux.Handle(tasks.TypeWebhookRegister, withExhaustHook(webhookRegH, func(ctx context.Context, t *asynq.Task, err error) {
 		webhookRegH.OnRetryExhausted(ctx, t, err)
+	}))
+	// build handler (T1.3.2): build_command 失败由 handler 自己 mark failed,
+	// retry 用尽的兜底就是 mark failed (但绝大多数 user error 已 SkipRetry)。
+	mux.Handle(tasks.TypeRunBuild, withExhaustHook(buildH, func(ctx context.Context, t *asynq.Task, err error) {
+		if p, perr := tasks.UnmarshalRunBuild(t.Payload()); perr == nil {
+			_ = machine.MarkFailed(ctx, p.RunID, "build retry exhausted: "+err.Error(), runstate.TransitionOpts{ProjectID: &p.ProjectID})
+		}
 	}))
 
 	// === 启动 + signal ===

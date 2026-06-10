@@ -12,6 +12,7 @@ type FakeEnqueuer struct {
 	mu        sync.Mutex
 	Checkouts []*tasks.GitCheckoutPayload
 	Webhooks  []*tasks.WebhookRegisterPayload
+	RunBuilds []*tasks.RunBuildPayload
 	// NextID 注入下一个任务返回的 ID,空则按序号自增。
 	NextID string
 	// Err 注入下一次调用的错误。
@@ -49,6 +50,23 @@ func (f *FakeEnqueuer) EnqueueWebhookRegister(_ context.Context, p *tasks.Webhoo
 	}
 	cp := *p
 	f.Webhooks = append(f.Webhooks, &cp)
+	if f.NextID != "" {
+		return f.NextID, nil
+	}
+	return "fake-task-id", nil
+}
+
+func (f *FakeEnqueuer) EnqueueRunBuild(_ context.Context, p *tasks.RunBuildPayload) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return "", f.Err
+	}
+	if err := p.Validate(); err != nil {
+		return "", err
+	}
+	cp := *p
+	f.RunBuilds = append(f.RunBuilds, &cp)
 	if f.NextID != "" {
 		return f.NextID, nil
 	}

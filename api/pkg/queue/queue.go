@@ -20,6 +20,7 @@ import (
 type Enqueuer interface {
 	EnqueueGitCheckout(ctx context.Context, p *tasks.GitCheckoutPayload) (taskID string, err error)
 	EnqueueWebhookRegister(ctx context.Context, p *tasks.WebhookRegisterPayload) (taskID string, err error)
+	EnqueueRunBuild(ctx context.Context, p *tasks.RunBuildPayload) (taskID string, err error)
 	Close() error
 }
 
@@ -52,7 +53,7 @@ func (e *AsynqEnqueuer) EnqueueGitCheckout(ctx context.Context, p *tasks.GitChec
 		asynq.Queue(tasks.QueueDefault),
 		asynq.MaxRetry(3),
 		asynq.Timeout(5*time.Minute),
-		asynq.Retention(24*time.Hour), // 完成后保留 1d 便于排障
+		asynq.Retention(24*time.Hour),
 	)
 	info, err := e.client.EnqueueContext(ctx, t)
 	if err != nil {
@@ -76,6 +77,28 @@ func (e *AsynqEnqueuer) EnqueueWebhookRegister(ctx context.Context, p *tasks.Web
 		asynq.MaxRetry(5),
 		asynq.Timeout(30*time.Second),
 		asynq.Retention(7*24*time.Hour),
+	)
+	info, err := e.client.EnqueueContext(ctx, t)
+	if err != nil {
+		return "", err
+	}
+	return info.ID, nil
+}
+
+// EnqueueRunBuild 把 build/execute 任务入队。retry=3, 超时=10 分钟。
+func (e *AsynqEnqueuer) EnqueueRunBuild(ctx context.Context, p *tasks.RunBuildPayload) (string, error) {
+	if err := p.Validate(); err != nil {
+		return "", fmt.Errorf("payload: %w", err)
+	}
+	body, err := p.Marshal()
+	if err != nil {
+		return "", err
+	}
+	t := asynq.NewTask(tasks.TypeRunBuild, body,
+		asynq.Queue(tasks.QueueDefault),
+		asynq.MaxRetry(3),
+		asynq.Timeout(10*time.Minute),
+		asynq.Retention(24*time.Hour),
 	)
 	info, err := e.client.EnqueueContext(ctx, t)
 	if err != nil {
