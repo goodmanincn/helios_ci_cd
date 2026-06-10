@@ -54,3 +54,29 @@ func TestUnmarshalGitCheckout_BadJSON(t *testing.T) {
 		t.Fatal("expect validation error")
 	}
 }
+
+// ===== ApprovalTimeoutPayload (T2.6.3) =====
+
+func TestApprovalTimeoutPayload_Roundtrip(t *testing.T) {
+	src := &ApprovalTimeoutPayload{RequestID: 99}
+	b, err := src.Marshal()
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	got, err := UnmarshalApprovalTimeout(b)
+	if err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if *got != *src {
+		t.Fatalf("roundtrip mismatch: %+v vs %+v", got, src)
+	}
+}
+
+func TestApprovalTimeoutPayload_Validate(t *testing.T) {
+	if (&ApprovalTimeoutPayload{RequestID: 1}).Validate() != nil {
+		t.Fatal("expect ok")
+	}
+	if (&ApprovalTimeoutPayload{}).Validate() == nil {
+		t.Fatal("expect err on zero request_id")
+	}
+}

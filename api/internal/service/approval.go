@@ -32,6 +32,7 @@ import (
 
 	"github.com/helios-cicd/helios/api/internal/model"
 	"github.com/helios-cicd/helios/api/pkg/runstate"
+	"github.com/helios-cicd/helios/api/pkg/tasks"
 )
 
 // ===== 业务错误 =====
@@ -82,15 +83,29 @@ type VoteResult struct {
 
 // ===== Service =====
 
+// TimeoutEnqueuer 窄接口, 让 Service 不强依赖整个 queue.Enqueuer.
+// queue.AsynqEnqueuer 自动满足.
+type TimeoutEnqueuer interface {
+	EnqueueApprovalTimeout(ctx context.Context, p *tasks.ApprovalTimeoutPayload, delay time.Duration) (taskID string, err error)
+}
+
 // ApprovalService 审批业务层. db 必填, machine 可空 (空则 Approve/Reject 跳过 run 推进只落投票).
+// timeoutEnq 可空 (空则不发延时任务, 即审批永不超时, 用于单元测试).
 type ApprovalService struct {
-	db      *gorm.DB
-	machine *runstate.Machine
+	db         *gorm.DB
+	machine    *runstate.Machine
+	timeoutEnq TimeoutEnqueuer
 }
 
 // NewApprovalService 构造.
 func NewApprovalService(db *gorm.DB, m *runstate.Machine) *ApprovalService {
 	return &ApprovalService{db: db, machine: m}
+}
+
+// WithTimeoutEnqueuer 链式注入延时任务 enqueuer, 启用超时分支.
+func (s *ApprovalService) WithTimeoutEnqueuer(enq TimeoutEnqueuer) *ApprovalService {
+	s.timeoutEnq = enq
+	return s
 }
 
 // Create 在 GORM tx 中落 approval_requests + 把 run 从 running 推到 approval.
@@ -147,6 +162,15 @@ func (s *ApprovalService) Create(ctx context.Context, in CreateInput) (*model.Ap
 		}); mErr != nil {
 			log.Printf("[approval] machine.MarkApproval run=%d stage=%s err=%v (request_id=%d 已落)",
 				in.RunID, in.StageID, mErr, req.ID)
+		}
+	}
+
+	// 入 asynq 延时超时任务 (T2.6.3). 没配 timeoutEnq 或 timeout=0 都跳过.
+	if s.timeoutEnq != nil && in.Timeout > 0 {
+		if _, tErr := s.timeoutEnq.EnqueueApprovalTimeout(ctx,
+			&tasks.ApprovalTimeoutPayload{RequestID: req.ID}, in.Timeout); tErr != nil {
+			log.Printf("[approval] enqueue timeout task request=%d err=%v (request 已落, 超时分支失效)",
+				req.ID, tErr)
 		}
 	}
 	return req, nil

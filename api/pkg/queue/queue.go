@@ -21,6 +21,8 @@ type Enqueuer interface {
 	EnqueueGitCheckout(ctx context.Context, p *tasks.GitCheckoutPayload) (taskID string, err error)
 	EnqueueWebhookRegister(ctx context.Context, p *tasks.WebhookRegisterPayload) (taskID string, err error)
 	EnqueueRunBuild(ctx context.Context, p *tasks.RunBuildPayload) (taskID string, err error)
+	// EnqueueApprovalTimeout 入延时任务 (asynq.ProcessIn). delay <=0 时立即执行 (兜底, 实际不该出现).
+	EnqueueApprovalTimeout(ctx context.Context, p *tasks.ApprovalTimeoutPayload, delay time.Duration) (taskID string, err error)
 	Close() error
 }
 
@@ -100,6 +102,37 @@ func (e *AsynqEnqueuer) EnqueueRunBuild(ctx context.Context, p *tasks.RunBuildPa
 		asynq.Timeout(10*time.Minute),
 		asynq.Retention(24*time.Hour),
 	)
+	info, err := e.client.EnqueueContext(ctx, t)
+	if err != nil {
+		return "", err
+	}
+	return info.ID, nil
+}
+
+// EnqueueApprovalTimeout 入审批超时延时任务 (T2.6.3)。
+//
+//   - delay >0: asynq.ProcessIn(delay) 进 scheduled set, 到时入 critical 队列消费
+//   - delay <=0: 立即入队 (兜底; 调用方应保证 delay >0)
+//   - MaxRetry=0: 超时本身就是终态信号, 失败重试无意义 (handler 也走幂等)
+//   - critical 队列优先级 6, 远高于 default=3, 保证人工等待的反馈不被普通构建积压
+func (e *AsynqEnqueuer) EnqueueApprovalTimeout(ctx context.Context, p *tasks.ApprovalTimeoutPayload, delay time.Duration) (string, error) {
+	if err := p.Validate(); err != nil {
+		return "", fmt.Errorf("payload: %w", err)
+	}
+	body, err := p.Marshal()
+	if err != nil {
+		return "", err
+	}
+	opts := []asynq.Option{
+		asynq.Queue(tasks.QueueCritical),
+		asynq.MaxRetry(0),
+		asynq.Timeout(30 * time.Second),
+		asynq.Retention(7 * 24 * time.Hour), // 保留 7 天便于排查超时分支
+	}
+	if delay > 0 {
+		opts = append(opts, asynq.ProcessIn(delay))
+	}
+	t := asynq.NewTask(tasks.TypeApprovalTimeout, body, opts...)
 	info, err := e.client.EnqueueContext(ctx, t)
 	if err != nil {
 		return "", err

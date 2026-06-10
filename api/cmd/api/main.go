@@ -143,7 +143,7 @@ func main() {
 	protected := v1.Group("")
 	protected.Use(authMW)
 	projectH.Register(protected)
-	approvalSvc := service.NewApprovalService(gdb, runMachine)
+	approvalSvc := service.NewApprovalService(gdb, runMachine).WithTimeoutEnqueuer(enq)
 	handler.NewRunHandler(gdb).WithRunControl(runMachine, enq).WithApproval(approvalSvc).Register(protected)
 	handler.NewMeHandler(gdb).Register(protected)
 	handler.NewPipelineHandler().Register(protected)

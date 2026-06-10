@@ -29,6 +29,12 @@ const (
 	// TypeRunBuild T1.3.2 简化执行引擎: 在 checkout 后的 workspace 跑 project.build_command。
 	// MVP 阶段直接 host bash 执行, E1.4 接 Docker 后替换为容器执行。
 	TypeRunBuild = "helios:run:build"
+
+	// TypeApprovalTimeout 审批超时 (T2.6.3)。
+	// 触发: ApprovalService.Create 时若 stage.Timeout 非空入延时任务 (asynq.ProcessIn(d))。
+	// Handler: worker/internal/handler/approval_timeout.go,按 on_timeout 三策略 reject/approve/pause。
+	// 幂等: handler 第一行 SELECT FOR UPDATE, 非 pending 直接 no-op (Approve/Reject 抢先时)。
+	TypeApprovalTimeout = "helios:approval:timeout"
 )
 
 // GitCheckoutPayload helios:git:checkout 的 payload。
@@ -144,3 +150,31 @@ const (
 	QueueCritical = "critical" // 关键路径 (审批超时等)
 	QueueLow      = "low"      // 后台清理 (日志归档等)
 )
+
+// ApprovalTimeoutPayload helios:approval:timeout 的 payload.
+//
+// 只带 RequestID; worker handler 自己查 approval_requests / runs 拿剩余信息.
+// 这样 enqueue 端不依赖任何业务状态, 便于幂等触发.
+type ApprovalTimeoutPayload struct {
+	RequestID int64 `json:"request_id"`
+}
+
+func (p *ApprovalTimeoutPayload) Validate() error {
+	if p.RequestID <= 0 {
+		return fmt.Errorf("request_id required")
+	}
+	return nil
+}
+
+func (p *ApprovalTimeoutPayload) Marshal() ([]byte, error) { return json.Marshal(p) }
+
+func UnmarshalApprovalTimeout(data []byte) (*ApprovalTimeoutPayload, error) {
+	var p ApprovalTimeoutPayload
+	if err := json.Unmarshal(data, &p); err != nil {
+		return nil, fmt.Errorf("unmarshal approval_timeout: %w", err)
+	}
+	if err := p.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid approval_timeout payload: %w", err)
+	}
+	return &p, nil
+}

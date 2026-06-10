@@ -14,6 +14,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/helios-cicd/helios/api/pkg/approval"
 	"github.com/helios-cicd/helios/api/pkg/git"
 	"github.com/helios-cicd/helios/api/pkg/logarchive"
 	"github.com/helios-cicd/helios/api/pkg/logstream"
@@ -123,6 +124,9 @@ func main() {
 		os.Getenv("HELIOS_WEBHOOK_DEV_SECRET"),
 	)
 
+	// T2.6.3: 审批超时 handler (asynq critical 队列).
+	approvalTimeoutH := handler.NewApprovalTimeout(approval.NewTimeouter(db, machine))
+
 	// === Asynq server ===
 	srv := asynq.NewServer(
 		asynq.RedisClientOpt{Addr: redisAddr},
@@ -160,6 +164,9 @@ func main() {
 			_ = machine.MarkFailed(ctx, p.RunID, "build retry exhausted: "+err.Error(), runstate.TransitionOpts{ProjectID: &p.ProjectID})
 		}
 	}))
+
+	// 审批超时 handler (T2.6.3): MaxRetry=0, 不接 exhaust hook (handler 自身幂等).
+	mux.Handle(tasks.TypeApprovalTimeout, approvalTimeoutH)
 
 	// === 启动 + signal ===
 	go func() {
