@@ -22,6 +22,9 @@ GREEN := \033[32m
 YELLOW := \033[33m
 RESET := \033[0m
 
+# Repo 根绝对路径 (供子进程定位 .helios/ workspace 等仓库相对资源)
+REPO_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+
 # === 帮助 ===
 .PHONY: help
 help:  ## 显示帮助
@@ -59,22 +62,51 @@ dev-deps-clean:  ## 停止并清除 dev 数据卷 (⚠️ 数据丢失)
 	@echo "✓ dev 数据已清空"
 
 # === 开发主入口 ===
+# 注意: 子 shell 用 `set -a; source .env; set +a` 把 .env 全部导入 env,
+# 让 go run 能拿到 HELIOS_DB_DSN / HELIOS_REDIS_ADDR 等。
 .PHONY: dev
-dev: dev-deps  ## 一键启动 (依赖 + API + Web)
-	@printf "$(YELLOW)启动 API ($(API_PORT)) 和 Web ($(WEB_PORT))...$(RESET)\n"
+dev: dev-deps dev-migrate  ## 一键启动 (依赖 + 迁移 + API + Worker + Web)
+	@test -f .env || (echo "✗ 缺少 .env,先跑 make setup" && exit 1)
+	@printf "$(YELLOW)启动 API ($(API_PORT)) + Worker + Web ($(WEB_PORT))...$(RESET)\n"
 	@printf "Ctrl+C 停止\n\n"
 	@trap 'kill 0' EXIT INT TERM; \
-		(cd api && HELIOS_API_ADDR=:$(API_PORT) go run ./cmd/api 2>&1 | sed "s/^/[$(CYAN)api$(RESET)] /") & \
-		(test -d web && cd web && PORT=$(WEB_PORT) pnpm dev 2>&1 | sed "s/^/[$(GREEN)web$(RESET)] /" || echo "[web] web/ 尚未初始化,跳过") & \
+		(set -a; . ./.env; set +a; \
+			HELIOS_API_ADDR=:$(API_PORT) \
+			HELIOS_JWT_PRIVATE_KEY_PATH=$(REPO_ROOT)/.helios/jwt-private.pem \
+			HELIOS_JWT_PUBLIC_KEY_PATH=$(REPO_ROOT)/.helios/jwt-public.pem \
+			HELIOS_WORKSPACE_DIR=$(REPO_ROOT)/.helios/runs \
+			go -C api run ./cmd/api    2>&1 | sed "s/^/[$(CYAN)api$(RESET)]    /") & \
+		(set -a; . ./.env; set +a; \
+			HELIOS_WORKSPACE_DIR=$(REPO_ROOT)/.helios/runs \
+			go -C worker run ./cmd/worker 2>&1 | sed "s/^/[$(YELLOW)worker$(RESET)] /") & \
+		(test -d web && (set -a; . ./.env; set +a; cd web && PORT=$(WEB_PORT) pnpm dev 2>&1 | sed "s/^/[$(GREEN)web$(RESET)]    /") || echo "[web] web/ 尚未初始化,跳过") & \
 		wait
 
 .PHONY: dev-api
-dev-api: dev-deps  ## 只跑 API
-	@cd api && HELIOS_API_ADDR=:$(API_PORT) go run ./cmd/api
+dev-api: dev-deps dev-migrate  ## 只跑 API
+	@set -a; . ./.env; set +a; \
+		HELIOS_API_ADDR=:$(API_PORT) \
+		HELIOS_JWT_PRIVATE_KEY_PATH=$(REPO_ROOT)/.helios/jwt-private.pem \
+		HELIOS_JWT_PUBLIC_KEY_PATH=$(REPO_ROOT)/.helios/jwt-public.pem \
+		go -C api run ./cmd/api
+
+.PHONY: dev-worker
+dev-worker: dev-deps  ## 只跑 Worker
+	@set -a; . ./.env; set +a; \
+		HELIOS_WORKSPACE_DIR=$(REPO_ROOT)/.helios/runs \
+		go -C worker run ./cmd/worker
 
 .PHONY: dev-web
 dev-web:  ## 只跑 Web
 	@cd web && PORT=$(WEB_PORT) pnpm dev
+
+.PHONY: dev-migrate
+dev-migrate: dev-deps  ## 跑 DB schema migration (幂等)
+	@set -a; . ./.env; set +a; go -C api run ./cmd/api --migrate
+
+.PHONY: dev-seed
+dev-seed: dev-migrate  ## 灌入开发种子数据 (admin/admin12345)
+	@set -a; . ./.env; set +a; go -C api run ./cmd/seed
 
 # === Lint ===
 .PHONY: lint
