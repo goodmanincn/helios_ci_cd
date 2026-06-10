@@ -19,6 +19,7 @@ import (
 
 	"github.com/helios-cicd/helios/api/internal/model"
 	"github.com/helios-cicd/helios/api/pkg/git"
+	"github.com/helios-cicd/helios/api/pkg/queue"
 )
 
 // ===== fake RunStore =====
@@ -145,7 +146,7 @@ func TestWebhook_HappyPath(t *testing.T) {
 		nextRunID:  42,
 		nextRunNum: 7,
 	}
-	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), "")
+	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), nil, "")
 	r := buildRouter(h)
 
 	body := samplePushBody("main")
@@ -168,7 +169,7 @@ func TestWebhook_HappyPath(t *testing.T) {
 // 2. 错签名 → 401
 func TestWebhook_BadSignature(t *testing.T) {
 	store := &fakeStore{project: projectGitHub("main", "topsecret")}
-	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), "")
+	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), nil, "")
 	r := buildRouter(h)
 
 	body := samplePushBody("main")
@@ -180,7 +181,7 @@ func TestWebhook_BadSignature(t *testing.T) {
 // 3. 缺签名 header → 401
 func TestWebhook_MissingSignature(t *testing.T) {
 	store := &fakeStore{project: projectGitHub("main", "topsecret")}
-	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), "")
+	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), nil, "")
 	r := buildRouter(h)
 
 	rec := doRequest(t, r, "1", "push", "", samplePushBody("main"))
@@ -190,7 +191,7 @@ func TestWebhook_MissingSignature(t *testing.T) {
 // 4. 缺 event header → 400
 func TestWebhook_MissingEvent(t *testing.T) {
 	store := &fakeStore{project: projectGitHub("main", "topsecret")}
-	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), "")
+	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), nil, "")
 	r := buildRouter(h)
 
 	body := samplePushBody("main")
@@ -204,7 +205,7 @@ func TestWebhook_MissingEvent(t *testing.T) {
 // 这符合 "尽快响应 ping" 的实际期望。
 func TestWebhook_Ping(t *testing.T) {
 	store := &fakeStore{project: projectGitHub("main", "topsecret")}
-	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), "")
+	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), nil, "")
 	r := buildRouter(h)
 
 	rec := doRequest(t, r, "1", "ping", "", []byte(`{}`))
@@ -216,7 +217,7 @@ func TestWebhook_Ping(t *testing.T) {
 func TestWebhook_NonDefaultBranch(t *testing.T) {
 	secret := "topsecret"
 	store := &fakeStore{project: projectGitHub("main", secret)}
-	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), "")
+	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), nil, "")
 	r := buildRouter(h)
 
 	body := samplePushBody("feature/x")
@@ -230,7 +231,7 @@ func TestWebhook_NonDefaultBranch(t *testing.T) {
 func TestWebhook_TagRef(t *testing.T) {
 	secret := "topsecret"
 	store := &fakeStore{project: projectGitHub("main", secret)}
-	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), "")
+	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), nil, "")
 	r := buildRouter(h)
 
 	tagBody := []byte(`{"ref":"refs/tags/v1","repository":{"name":"api","full_name":"acme/api","default_branch":"main","owner":{"login":"acme"}},"pusher":{}}`)
@@ -243,7 +244,7 @@ func TestWebhook_TagRef(t *testing.T) {
 // 8. 项目不存在 → 404
 func TestWebhook_ProjectNotFound(t *testing.T) {
 	store := &fakeStore{} // project nil
-	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), "")
+	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), nil, "")
 	r := buildRouter(h)
 
 	rec := doRequest(t, r, "999", "push", "sha256=x", samplePushBody("main"))
@@ -253,7 +254,7 @@ func TestWebhook_ProjectNotFound(t *testing.T) {
 // 9. 非数字 project_id → 400
 func TestWebhook_BadProjectID(t *testing.T) {
 	store := &fakeStore{}
-	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), "")
+	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), nil, "")
 	r := buildRouter(h)
 
 	rec := doRequest(t, r, "abc", "push", "sha256=x", []byte("{}"))
@@ -263,7 +264,7 @@ func TestWebhook_BadProjectID(t *testing.T) {
 // 10. project 没配 secret + dev_secret 也空 → 400 (secret not set)
 func TestWebhook_NoSecretConfigured(t *testing.T) {
 	store := &fakeStore{project: projectGitHub("main", "")} // config 无 secret
-	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), "")
+	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), nil, "")
 	r := buildRouter(h)
 
 	body := samplePushBody("main")
@@ -280,7 +281,7 @@ func TestWebhook_DevSecretFallback(t *testing.T) {
 		nextRunID:  1,
 		nextRunNum: 1,
 	}
-	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), devSecret)
+	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), nil, devSecret)
 	r := buildRouter(h)
 
 	body := samplePushBody("main")
@@ -293,7 +294,7 @@ func TestWebhook_DevSecretFallback(t *testing.T) {
 func TestWebhook_NonPushEvent(t *testing.T) {
 	secret := "topsecret"
 	store := &fakeStore{project: projectGitHub("main", secret)}
-	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), "")
+	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), nil, "")
 	r := buildRouter(h)
 
 	body := []byte(`{"action":"opened"}`)
@@ -308,7 +309,7 @@ func TestWebhook_WrongRepoType(t *testing.T) {
 	p := projectGitHub("main", "x")
 	p.RepoType = "gitlab"
 	store := &fakeStore{project: p}
-	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), "")
+	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), nil, "")
 	r := buildRouter(h)
 
 	rec := doRequest(t, r, "1", "push", "sha256=x", samplePushBody("main"))
@@ -318,7 +319,7 @@ func TestWebhook_WrongRepoType(t *testing.T) {
 // 14. store DB 错误 → 500
 func TestWebhook_StoreDBError(t *testing.T) {
 	store := &fakeStore{getErr: errors.New("connection refused")}
-	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), "")
+	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), nil, "")
 	r := buildRouter(h)
 
 	rec := doRequest(t, r, "1", "push", "sha256=x", []byte("{}"))
@@ -332,11 +333,64 @@ func TestWebhook_CreateRunFails(t *testing.T) {
 		project:   projectGitHub("main", secret),
 		createErr: errors.New("disk full"),
 	}
-	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), "")
+	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), nil, "")
 	r := buildRouter(h)
 
 	body := samplePushBody("main")
 	rec := doRequest(t, r, "1", "push", signGitHub(secret, body), body)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	assert.Contains(t, rec.Body.String(), "create run")
+}
+
+// 16. enqueue git_checkout 触发 + payload 完整
+func TestWebhook_EnqueuesGitCheckout(t *testing.T) {
+	secret := "topsecret"
+	store := &fakeStore{
+		project:    projectGitHub("main", secret),
+		nextRunID:  99,
+		nextRunNum: 3,
+	}
+	enq := queue.NewFake()
+	enq.NextID = "asynq-xyz"
+	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), enq, "")
+	r := buildRouter(h)
+
+	body := samplePushBody("main")
+	rec := doRequest(t, r, "1", "push", signGitHub(secret, body), body)
+
+	require.Equal(t, http.StatusAccepted, rec.Code, "body=%s", rec.Body.String())
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "asynq-xyz", resp["task_id"])
+
+	require.Len(t, enq.Checkouts, 1)
+	p := enq.Checkouts[0]
+	assert.Equal(t, int64(99), p.RunID)
+	assert.Equal(t, int64(1), p.ProjectID)
+	assert.Equal(t, "https://github.com/acme/api.git", p.RepoURL)
+	assert.Equal(t, "main", p.Branch)
+	assert.Equal(t, "bbb", p.CommitSHA)
+}
+
+// 17. enqueue 失败 → run 仍创建, 返 202 task_id 空 (不阻塞 webhook)
+func TestWebhook_EnqueueFailsButRunCreated(t *testing.T) {
+	secret := "topsecret"
+	store := &fakeStore{
+		project:    projectGitHub("main", secret),
+		nextRunID:  77,
+		nextRunNum: 1,
+	}
+	enq := queue.NewFake()
+	enq.Err = errors.New("redis down")
+	h := NewGitHubHandler(store, git.NewGitHubProvider(git.GitHubConfig{}), enq, "")
+	r := buildRouter(h)
+
+	body := samplePushBody("main")
+	rec := doRequest(t, r, "1", "push", signGitHub(secret, body), body)
+
+	require.Equal(t, http.StatusAccepted, rec.Code)
+	var resp map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	assert.Equal(t, "", resp["task_id"])
+	assert.Equal(t, 1, store.createCount)
 }

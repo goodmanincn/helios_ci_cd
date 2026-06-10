@@ -27,6 +27,7 @@ import (
 	"github.com/helios-cicd/helios/api/internal/service"
 	"github.com/helios-cicd/helios/api/pkg/git"
 	heliosjwt "github.com/helios-cicd/helios/api/pkg/jwt"
+	"github.com/helios-cicd/helios/api/pkg/queue"
 )
 
 // Version 通过 ldflags 注入,默认 dev
@@ -80,7 +81,9 @@ func main() {
 	gh := git.NewGitHubProvider(git.GitHubConfig{
 		Token: os.Getenv("HELIOS_GITHUB_TOKEN"), // 可空,目前 webhook 接收不需要 token
 	})
-	webhookH := webhookh.NewGitHubHandler(webhookh.NewGormRunStore(gdb), gh, os.Getenv("HELIOS_WEBHOOK_DEV_SECRET"))
+	enq := queue.New(os.Getenv("HELIOS_REDIS_ADDR"))
+	defer func() { _ = enq.Close() }()
+	webhookH := webhookh.NewGitHubHandler(webhookh.NewGormRunStore(gdb), gh, enq, os.Getenv("HELIOS_WEBHOOK_DEV_SECRET"))
 	authMW := middleware.RequireAuth(middleware.AuthDeps{Issuer: issuer, Authstore: store})
 
 	// ===== 路由 =====

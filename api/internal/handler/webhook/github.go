@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -25,6 +26,8 @@ import (
 
 	"github.com/helios-cicd/helios/api/internal/model"
 	"github.com/helios-cicd/helios/api/pkg/git"
+	"github.com/helios-cicd/helios/api/pkg/queue"
+	"github.com/helios-cicd/helios/api/pkg/tasks"
 )
 
 // maxPayloadSize webhook body 最大字节数 (10MB), GitHub 实际不会超 25MB,我们截止 10MB 防滥用。
@@ -48,13 +51,16 @@ var ErrProjectNotFound = errors.New("project not found")
 type GitHubHandler struct {
 	store    RunStore
 	provider git.Provider
+	enq      queue.Enqueuer
 	// devSecret 当项目未配置 webhook_secret 时的兜底密钥(仅 dev/测试,生产应留空)。
 	devSecret string
 }
 
-// NewGitHubHandler 构造。dev 兜底密钥通过 HELIOS_WEBHOOK_DEV_SECRET env 注入。
-func NewGitHubHandler(store RunStore, provider git.Provider, devSecret string) *GitHubHandler {
-	return &GitHubHandler{store: store, provider: provider, devSecret: devSecret}
+// NewGitHubHandler 构造。
+//   - enq 可为 nil (仅 unit test 旧路径),生产路径必传。
+//   - devSecret 通过 HELIOS_WEBHOOK_DEV_SECRET env 注入,生产应留空。
+func NewGitHubHandler(store RunStore, provider git.Provider, enq queue.Enqueuer, devSecret string) *GitHubHandler {
+	return &GitHubHandler{store: store, provider: provider, enq: enq, devSecret: devSecret}
 }
 
 // Register 在 router 上挂载路由 (不需要 auth 中间件)。
@@ -176,12 +182,30 @@ func (h *GitHubHandler) handle(c *gin.Context) {
 		return
 	}
 
+	// 10. 入队 git checkout 任务 (worker 异步拉代码并把 run 推进到 running)
+	//     入队失败 → run 已落库,标记错误但仍返 202 (让 GitHub 不重投, 用户在 UI 看错误)
+	var taskID string
+	if h.enq != nil {
+		taskID, err = h.enq.EnqueueGitCheckout(c.Request.Context(), &tasks.GitCheckoutPayload{
+			RunID:     runID,
+			ProjectID: project.ID,
+			RepoURL:   project.RepoURL,
+			Branch:    ev.Branch,
+			CommitSHA: ev.After,
+		})
+		if err != nil {
+			// 不阻塞 webhook 响应,但落审计便于排查
+			log.Printf("enqueue git_checkout failed: run_id=%d err=%v", runID, err)
+		}
+	}
+
 	c.JSON(http.StatusAccepted, gin.H{
 		"message":    "run queued",
 		"run_id":     runID,
 		"run_number": runNumber,
 		"branch":     ev.Branch,
 		"commit":     ev.After,
+		"task_id":    taskID,
 	})
 }
 
