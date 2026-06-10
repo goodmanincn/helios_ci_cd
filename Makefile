@@ -31,7 +31,7 @@ help:  ## 显示帮助
 	@printf "$(CYAN)Helios 开发命令$(RESET)\n\n"
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  $(GREEN)%-18s$(RESET) %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 	@printf "\n$(YELLOW)常用工作流:$(RESET)\n"
-	@printf "  首次启动:  make setup && make dev\n"
+	@printf "  首次启动:  make setup && make dev-seed && make dev\n"
 	@printf "  日常开发:  make dev\n"
 	@printf "  提交前:    make lint test\n"
 	@printf "  重置:      make clean\n\n"
