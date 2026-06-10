@@ -247,3 +247,68 @@ func TestScheduler_Integration_5Stage_Matrix(t *testing.T) {
 	require.True(t, sch.Done())
 	require.Equal(t, StatusSuccess, sch.Outcome())
 }
+
+// ---- E2.6: approval 节点 NextReady 转 waiting_approval, Complete 推进 ----
+
+func TestScheduler_ApprovalNode_WaitsForCompletion(t *testing.T) {
+	// build → approve(type=approval) → deploy
+	p := &dsl.Pipeline{
+		Version: "1", Name: "x",
+		Stages: []dsl.Stage{
+			mkStage("build"),
+			{
+				ID: "approve", Needs: []string{"build"},
+				Type: "approval", Approvers: []string{"alice"},
+			},
+			mkStage("deploy", "approve"),
+		},
+	}
+	d := BuildDAG(p)
+	sch := NewScheduler(d)
+
+	// 轮 1: build
+	require.Equal(t, []NodeID{"build"}, sch.NextReady())
+	require.NoError(t, sch.Complete("build", StatusSuccess))
+
+	// 轮 2: approve 被派发, 但状态是 waiting_approval (不是 running)
+	r := sch.NextReady()
+	require.Equal(t, []NodeID{"approve"}, r)
+	require.Equal(t, StatusWaitingApproval, sch.Status("approve"))
+
+	// 同时 deploy 还在 pending, 也不会出现在 ready
+	require.Equal(t, StatusPending, sch.Status("deploy"))
+	require.False(t, sch.Done())
+	require.Empty(t, sch.NextReady(), "approve 还没结果时不能再返")
+
+	// 模拟审批通过
+	require.NoError(t, sch.Complete("approve", StatusSuccess))
+
+	// 轮 3: deploy ready
+	require.Equal(t, []NodeID{"deploy"}, sch.NextReady())
+	require.NoError(t, sch.Complete("deploy", StatusSuccess))
+	require.True(t, sch.Done())
+	require.Equal(t, StatusSuccess, sch.Outcome())
+}
+
+func TestScheduler_ApprovalNode_Rejected_DownstreamSkip(t *testing.T) {
+	// approve 节点 Complete failed (即被 reject), 下游 deploy 应 skip
+	p := &dsl.Pipeline{
+		Version: "1", Name: "x",
+		Stages: []dsl.Stage{
+			{ID: "approve", Type: "approval", Approvers: []string{"alice"}},
+			mkStage("deploy", "approve"),
+		},
+	}
+	d := BuildDAG(p)
+	sch := NewScheduler(d)
+
+	r := sch.NextReady()
+	require.Equal(t, []NodeID{"approve"}, r)
+	require.Equal(t, StatusWaitingApproval, sch.Status("approve"))
+
+	require.NoError(t, sch.Complete("approve", StatusFailed))
+	sch.NextReady()
+	require.Equal(t, StatusSkipped, sch.Status("deploy"))
+	require.True(t, sch.Done())
+	require.Equal(t, StatusFailed, sch.Outcome())
+}

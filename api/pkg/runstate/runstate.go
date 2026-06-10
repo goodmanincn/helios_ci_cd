@@ -5,17 +5,24 @@
 //	            ┌──────────────────────────────────┐
 //	            ↓                                  │
 //	pending ──→ running ──→ success               │
+//	   │           │  │                           │
+//	   │           │  └→ failed                   │
 //	   │           │                              │
-//	   │           └──→ failed                    │
+//	   │           ↓                              │
+//	   │        approval ──→ running              │
+//	   │           │                              │
+//	   │           ├→ failed  (人工 reject / on_timeout=reject)
+//	   │           ├→ timeout (on_timeout=reject 的超时终态; 与 failed 等价但区分上报)
+//	   │           └→ canceled                    │
 //	   │                                          │
 //	   └──→ canceled  ←──────────────────────────┘
-//	   (running → canceled 也允许; 仅由用户/系统主动调用)
+//	   (任何非终态都可被用户/系统主动 → canceled)
 //
 // 设计:
 //   - 唯一可信的状态转移函数 Transition
 //   - 不允许跳过中间态 (pending → success 直接 ❌, 必须 running → success)
 //   - canceled 是吸收态: 任何非终态 → canceled 都合法 (用户取消)
-//   - 终态 (success/failed/canceled) 永不再转换
+//   - 终态 (success/failed/canceled/timeout) 永不再转换
 //   - 每次状态变更同事务写 audit_logs 一行 (action=run.{status})
 //   - 所有 DB 操作走 *sql.DB, 不依赖 GORM, 跨 module 安全
 package runstate
@@ -33,9 +40,11 @@ import (
 const (
 	StatusPending  = "pending"
 	StatusRunning  = "running"
+	StatusApproval = "approval" // 等待人工审批 (E2.6)
 	StatusSuccess  = "success"
 	StatusFailed   = "failed"
 	StatusCanceled = "canceled"
+	StatusTimeout  = "timeout" // 审批超时终态 (on_timeout=reject 走这, 与 failed 等价但区分上报)
 )
 
 // 业务错误。
@@ -48,13 +57,14 @@ var (
 
 // IsTerminal 判定状态是否终态 (不再可转移)。
 func IsTerminal(s string) bool {
-	return s == StatusSuccess || s == StatusFailed || s == StatusCanceled
+	return s == StatusSuccess || s == StatusFailed || s == StatusCanceled || s == StatusTimeout
 }
 
 // IsValidStatus 是否合法状态字符串。
 func IsValidStatus(s string) bool {
 	switch s {
-	case StatusPending, StatusRunning, StatusSuccess, StatusFailed, StatusCanceled:
+	case StatusPending, StatusRunning, StatusApproval,
+		StatusSuccess, StatusFailed, StatusCanceled, StatusTimeout:
 		return true
 	}
 	return false
@@ -65,10 +75,12 @@ func IsValidStatus(s string) bool {
 // 矩阵 (源 → 允许的目标集):
 //
 //	pending  → running | canceled
-//	running  → success | failed  | canceled
+//	running  → approval | success | failed | canceled
+//	approval → running  | failed  | timeout | canceled
 //	success  → (none)
 //	failed   → (none)
 //	canceled → (none)
+//	timeout  → (none)
 func CanTransition(from, to string) bool {
 	if !IsValidStatus(from) || !IsValidStatus(to) {
 		return false
@@ -83,7 +95,11 @@ func CanTransition(from, to string) bool {
 	case StatusPending:
 		return to == StatusRunning || to == StatusCanceled
 	case StatusRunning:
-		return to == StatusSuccess || to == StatusFailed || to == StatusCanceled
+		return to == StatusApproval ||
+			to == StatusSuccess || to == StatusFailed || to == StatusCanceled
+	case StatusApproval:
+		return to == StatusRunning ||
+			to == StatusFailed || to == StatusTimeout || to == StatusCanceled
 	}
 	return false
 }
@@ -169,7 +185,7 @@ func (m *Machine) Transition(ctx context.Context, runID int64, to string, opts T
 		if !setStarted {
 			updStarted = sql.NullTime{Time: now, Valid: true}
 		}
-	case StatusSuccess, StatusFailed, StatusCanceled:
+	case StatusSuccess, StatusFailed, StatusCanceled, StatusTimeout:
 		if !setFinished {
 			updFinished = sql.NullTime{Time: now, Valid: true}
 		}
@@ -255,6 +271,19 @@ func (m *Machine) MarkFailed(ctx context.Context, runID int64, reason string, op
 // MarkCanceled 便捷封装 (一般由用户触发)。
 func (m *Machine) MarkCanceled(ctx context.Context, runID int64, opts TransitionOpts) error {
 	_, _, _, err := m.Transition(ctx, runID, StatusCanceled, opts)
+	return err
+}
+
+// MarkApproval 便捷封装 (scheduler 命中 approval 节点时调用, 把 running → approval)。
+func (m *Machine) MarkApproval(ctx context.Context, runID int64, opts TransitionOpts) error {
+	_, _, _, err := m.Transition(ctx, runID, StatusApproval, opts)
+	return err
+}
+
+// MarkTimeout 便捷封装 (审批 on_timeout=reject 路径用)。
+func (m *Machine) MarkTimeout(ctx context.Context, runID int64, reason string, opts TransitionOpts) error {
+	opts.Reason = reason
+	_, _, _, err := m.Transition(ctx, runID, StatusTimeout, opts)
 	return err
 }
 

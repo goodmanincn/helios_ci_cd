@@ -36,13 +36,14 @@ import (
 type NodeStatus string
 
 const (
-	StatusPending  NodeStatus = "pending"
-	StatusReady    NodeStatus = "ready"
-	StatusRunning  NodeStatus = "running"
-	StatusSuccess  NodeStatus = "success"
-	StatusFailed   NodeStatus = "failed"
-	StatusSkipped  NodeStatus = "skipped"
-	StatusCanceled NodeStatus = "canceled"
+	StatusPending         NodeStatus = "pending"
+	StatusReady           NodeStatus = "ready"
+	StatusRunning         NodeStatus = "running"
+	StatusWaitingApproval NodeStatus = "waiting_approval" // approval 节点已派发, 等审批结果 (E2.6)
+	StatusSuccess         NodeStatus = "success"
+	StatusFailed          NodeStatus = "failed"
+	StatusSkipped         NodeStatus = "skipped"
+	StatusCanceled        NodeStatus = "canceled"
 )
 
 // IsTerminal 终态判定 (后续不再变化)。
@@ -113,6 +114,10 @@ func (s *Scheduler) Snapshot() map[NodeID]NodeStatus {
 // NextReady 返回当前所有可派发的节点 (状态 pending + 依赖满足),
 // 同时把它们置为 running 并记到 dispatched. 不会重复返同一个。
 //
+// 特殊: approval 类型节点 (Stage.Type=="approval") 被置为 StatusWaitingApproval,
+// 由外层 service 创建 approval_requests 行 + 等用户/超时调 Complete 推进。
+// 这类节点同样进入 dispatched, NextReady 不会再次返回它们。
+//
 // "依赖满足" = 所有 needs 都是 success, 或 (needs 含 failed 且本节点 if=always()/failure()).
 // 依赖含 canceled/skipped 时一律视为本节点 skipped (除非 if=always 也强制运行).
 //
@@ -133,7 +138,13 @@ func (s *Scheduler) NextReady() []NodeID {
 		next := s.computeReadyOrSkip(id)
 		switch next {
 		case StatusReady:
-			s.status[id] = StatusRunning
+			n := s.dag.Nodes[id]
+			if n != nil && n.Stage != nil && n.Stage.Type == "approval" {
+				// approval 节点不走 runner, 转入 waiting_approval, caller 拿到后建 approval_requests
+				s.status[id] = StatusWaitingApproval
+			} else {
+				s.status[id] = StatusRunning
+			}
 			s.dispatched[id] = true
 			ready = append(ready, id)
 		case StatusSkipped:

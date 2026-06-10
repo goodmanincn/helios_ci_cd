@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -130,6 +131,20 @@ func validateStruct(r *ParseResult) Errors {
 				es = append(es, mkErr(ErrSchema,
 					fmt.Sprintf("approval mode %q invalid (allowed: any, all, quorum)", s.Mode),
 					stagePath+".mode", childMap(stageNode, "mode")))
+			}
+			// timeout 格式 (Go time.ParseDuration: 30s/5m/1h/24h). 空值合法 = 永不超时.
+			if s.Timeout != "" {
+				if _, perr := time.ParseDuration(s.Timeout); perr != nil {
+					es = append(es, mkErr(ErrSchema,
+						fmt.Sprintf("approval timeout %q invalid (expect Go duration like 30s, 5m, 1h): %v", s.Timeout, perr),
+						stagePath+".timeout", childMap(stageNode, "timeout")))
+				}
+			}
+			// on_timeout 枚举 (空值合法 = ApprovalService 跑时 fallback reject).
+			if s.OnTimeout != "" && !inSet(s.OnTimeout, "reject", "approve", "pause") {
+				es = append(es, mkErr(ErrSchema,
+					fmt.Sprintf("approval on_timeout %q invalid (allowed: reject, approve, pause)", s.OnTimeout),
+					stagePath+".on_timeout", childMap(stageNode, "on_timeout")))
 			}
 		} else {
 			// 普通 stage: steps 或 uses 必有其一 (但不能同时)

@@ -26,12 +26,22 @@ func TestCanTransition_Matrix(t *testing.T) {
 		{StatusRunning, StatusSuccess, true},
 		{StatusRunning, StatusFailed, true},
 		{StatusRunning, StatusCanceled, true},
+		// approval 相关 (E2.6)
+		{StatusRunning, StatusApproval, true},
+		{StatusApproval, StatusRunning, true},
+		{StatusApproval, StatusFailed, true},
+		{StatusApproval, StatusTimeout, true},
+		{StatusApproval, StatusCanceled, true},
 		// 非法: 自循环
 		{StatusPending, StatusPending, false},
 		{StatusRunning, StatusRunning, false},
+		{StatusApproval, StatusApproval, false},
 		// 非法: 跳过中间态
 		{StatusPending, StatusSuccess, false},
 		{StatusPending, StatusFailed, false},
+		{StatusPending, StatusApproval, false},
+		// 非法: approval 不能直接到 success (必须 approval→running→success)
+		{StatusApproval, StatusSuccess, false},
 		// 非法: 终态出发
 		{StatusSuccess, StatusRunning, false},
 		{StatusSuccess, StatusFailed, false},
@@ -39,6 +49,8 @@ func TestCanTransition_Matrix(t *testing.T) {
 		{StatusFailed, StatusRunning, false},
 		{StatusCanceled, StatusRunning, false},
 		{StatusCanceled, StatusSuccess, false},
+		{StatusTimeout, StatusRunning, false},
+		{StatusTimeout, StatusApproval, false},
 		// 非法: 反向
 		{StatusRunning, StatusPending, false},
 		// 非法: 未知状态
@@ -55,12 +67,12 @@ func TestCanTransition_Matrix(t *testing.T) {
 }
 
 func TestIsTerminal(t *testing.T) {
-	for _, s := range []string{StatusSuccess, StatusFailed, StatusCanceled} {
+	for _, s := range []string{StatusSuccess, StatusFailed, StatusCanceled, StatusTimeout} {
 		if !IsTerminal(s) {
 			t.Errorf("%q should be terminal", s)
 		}
 	}
-	for _, s := range []string{StatusPending, StatusRunning, ""} {
+	for _, s := range []string{StatusPending, StatusRunning, StatusApproval, ""} {
 		if IsTerminal(s) {
 			t.Errorf("%q should NOT be terminal", s)
 		}
@@ -69,7 +81,8 @@ func TestIsTerminal(t *testing.T) {
 
 func TestIsValidStatus(t *testing.T) {
 	for _, s := range []string{
-		StatusPending, StatusRunning, StatusSuccess, StatusFailed, StatusCanceled,
+		StatusPending, StatusRunning, StatusApproval,
+		StatusSuccess, StatusFailed, StatusCanceled, StatusTimeout,
 	} {
 		if !IsValidStatus(s) {
 			t.Errorf("%q should be valid", s)

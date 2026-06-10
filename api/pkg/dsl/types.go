@@ -85,9 +85,10 @@ type Stage struct {
 	Services  map[string]Service `yaml:"services,omitempty" json:"services,omitempty"`
 
 	// approval 子字段 (type=approval 时)
-	Approvers []string `yaml:"approvers,omitempty" json:"approvers,omitempty"`
-	Mode      string   `yaml:"mode,omitempty"      json:"mode,omitempty"` // any / all / quorum
-	Timeout   string   `yaml:"timeout,omitempty"   json:"timeout,omitempty"` // 1h / 24h
+	Approvers []string `yaml:"approvers,omitempty"  json:"approvers,omitempty"`
+	Mode      string   `yaml:"mode,omitempty"       json:"mode,omitempty"`        // any / all / quorum
+	Timeout   string   `yaml:"timeout,omitempty"    json:"timeout,omitempty"`     // Go time.ParseDuration: 1h / 24h / 30s
+	OnTimeout string   `yaml:"on_timeout,omitempty" json:"on_timeout,omitempty"` // reject (默认) / approve / pause
 }
 
 // Step 一个执行步骤 (run shell / uses 插件 二选一)。

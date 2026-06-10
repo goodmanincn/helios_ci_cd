@@ -5,6 +5,7 @@
 package dsl
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -368,6 +369,30 @@ stages:
 `,
 			want: "approval stage must not have steps",
 		},
+		{
+			name: "approval timeout bad format",
+			yaml: `version: "1"
+name: x
+stages:
+  - id: a
+    type: approval
+    approvers: [alice]
+    timeout: "5x"
+`,
+			want: "approval timeout \"5x\" invalid",
+		},
+		{
+			name: "approval on_timeout invalid",
+			yaml: `version: "1"
+name: x
+stages:
+  - id: a
+    type: approval
+    approvers: [alice]
+    on_timeout: explode
+`,
+			want: "approval on_timeout \"explode\" invalid",
+		},
 	}
 
 	for _, tc := range cases {
@@ -435,4 +460,51 @@ stages:
 	_, es := ValidateRaw([]byte(src))
 	require.GreaterOrEqual(t, len(es), 4,
 		"expected at least 4 accumulated errors, got %d: %v", len(es), es)
+}
+
+// ---- approval 合法变体: timeout/on_timeout 空 + 合法格式 都过 ----
+
+func TestValidate_ApprovalTimeoutAndOnTimeout_OK(t *testing.T) {
+	cases := []string{
+		// 空 timeout + 空 on_timeout
+		`version: "1"
+name: x
+stages:
+  - id: a
+    type: approval
+    approvers: [alice]
+`,
+		// 合法 timeout + on_timeout reject
+		`version: "1"
+name: x
+stages:
+  - id: a
+    type: approval
+    approvers: [alice]
+    timeout: "30s"
+    on_timeout: reject
+`,
+		// 各种合法 duration + on_timeout 三选项
+		`version: "1"
+name: x
+stages:
+  - id: a
+    type: approval
+    approvers: [alice]
+    timeout: "1h30m"
+    on_timeout: approve
+  - id: b
+    type: approval
+    needs: [a]
+    approvers: [alice]
+    timeout: "24h"
+    on_timeout: pause
+`,
+	}
+	for i, y := range cases {
+		t.Run(fmt.Sprintf("ok-%d", i), func(t *testing.T) {
+			_, es := ValidateRaw([]byte(y))
+			require.Empty(t, es, "expected no errors, got: %v", es)
+		})
+	}
 }
