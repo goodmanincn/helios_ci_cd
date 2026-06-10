@@ -14,6 +14,7 @@ import { useParams } from "next/navigation";
 import { useAuthStore } from "@/lib/auth-store";
 import { AuthGuard } from "@/components/auth-guard";
 import { AppShell } from "@/components/app-shell";
+import { LogsPanel } from "@/components/logs-panel";
 import { ApiException } from "@/lib/api";
 import {
   RunDetail,
@@ -90,7 +91,9 @@ function RunDetailInner() {
           <div className="flex flex-col gap-4">
             <RunMetaCard run={run} />
             <StagesCard stages={run.stages} runStatus={run.status} />
-            <LogsPlaceholder runId={run.id} />
+            {accessToken && (
+              <LogsPanel runId={run.id} token={accessToken} runStatus={run.status} />
+            )}
           </div>
         )}
       </div>
@@ -280,27 +283,6 @@ function StepRow({ st }: { st: Step }) {
       <span className="ml-auto text-xs" style={{ color: "var(--fg-dim)" }}>
         {fmtDuration(st.duration_ms)}
       </span>
-    </div>
-  );
-}
-
-function LogsPlaceholder({ runId }: { runId: number }) {
-  return (
-    <div
-      className="card text-sm"
-      style={{
-        border: "1px dashed var(--border-strong)",
-        background: "var(--bg-elev-2)",
-        color: "var(--fg-dim)",
-      }}
-    >
-      <div className="mb-1" style={{ color: "var(--fg-mute)", fontWeight: 600 }}>
-        实时日志 (run #{runId})
-      </div>
-      ⓘ T1.6.3 将在此处接入 SSE 实时日志面板。当前可直接访问 API: <br />
-      <code className="text-xs" style={{ color: "var(--accent)" }}>
-        GET /api/v1/runs/{runId}/logs?source=auto
-      </code>
     </div>
   );
 }
