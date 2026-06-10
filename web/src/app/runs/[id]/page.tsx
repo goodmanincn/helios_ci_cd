@@ -1,14 +1,19 @@
 "use client";
 
-// Run 详情页 (T1.6.2)
-// 极简版: meta + stages 树, 日志面板留给 T1.6.3, cancel/retry 留给 T1.6.4
-// 简化点:
-//  - 没用 ui/run-detail.html 的三栏布局 (那个偏后端完整后再做)
-//  - 走 AppShell 单列, 顶部 meta + 下方 stages 折叠列表
-//  - run.status=running 时 5s 轮询 (M1 没真 stage, 主要看 status 推进)
+// Run 详情页 (T1.6.2 + T1.7.4: 对齐 ui/run-detail.html 三栏布局)
+//
+// 布局:
+//   ┌─ 顶部 meta 条: 状态 pill / #number / pipeline 名 / cancel+retry 按钮
+//   ├─ 元信息行: 分支 / commit / 触发方式 / 触发人 / 时长
+//   ├─ 水平 stage rail (流程进度条, MVP 简化版)
+//   ├─ 下方两栏 (280px 步骤树 | 1fr 日志):
+//   │    aside: 阶段/步骤 树, 步骤点击 → 选中
+//   │    main:  LogsPanel (M1 是 run-level, 显示选中 step 名做上下文)
+//
+// M1 简化: 后端常 0 stages (简化引擎), 走 fallback 虚拟单 step "build" 给 UI 呈现。
+// running/pending 时 5s 轮询 run.status 推进 (主要看终态过渡)。
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
 import { useAuthStore } from "@/lib/auth-store";
@@ -37,6 +42,12 @@ export default function RunDetailPage() {
   );
 }
 
+interface SelectedStep {
+  stageId: number;
+  stepId: number;
+  label: string;
+}
+
 function RunDetailInner() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -48,6 +59,7 @@ function RunDetailInner() {
   const [err, setErr] = useState<string | null>(null);
   const [actionErr, setActionErr] = useState<string | null>(null);
   const [acting, setActing] = useState<"cancel" | "retry" | null>(null);
+  const [selected, setSelected] = useState<SelectedStep | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const load = useCallback(async () => {
@@ -85,7 +97,6 @@ function RunDetailInner() {
     setActionErr(null);
     try {
       const res = await retryRun(accessToken, run.id);
-      // 跳转到新 run 详情
       router.push(`/runs/${res.id}`);
     } catch (e) {
       setActionErr(e instanceof ApiException ? e.message : String(e));
@@ -94,7 +105,6 @@ function RunDetailInner() {
   }, [accessToken, run, router]);
 
   useEffect(() => {
-    // 初始化 fetch — react-hooks/set-state-in-effect 误报, 列表页这是合理模式
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
@@ -114,71 +124,136 @@ function RunDetailInner() {
     };
   }, [run, load]);
 
-  return (
-    <AppShell title={run ? `运行 #${run.number}` : "运行详情"}>
-      <div className="px-6 py-6 max-w-5xl mx-auto w-full">
-        <Breadcrumb run={run} />
+  // 选中第一个步骤 (有 stage 时), 或虚拟 build
+  useEffect(() => {
+    if (!run || selected) return;
+    const first = firstSelectableStep(run.stages);
+    if (first) setSelected(first); // eslint-disable-line react-hooks/set-state-in-effect
+  }, [run, selected]);
 
-        {loading && <div className="card text-sm" style={{ color: "var(--fg-mute)" }}>加载中...</div>}
-        {err && <div className="err-msg">{err}</div>}
+  // breadcrumb title: 项目名 #run.number
+  const title = run
+    ? `${run.project?.name ?? "运行"} #${run.number}`
+    : "运行详情";
+
+  return (
+    <AppShell title={title}>
+      <div className="rd-root">
+        {loading && (
+          <div className="rd-loading">加载中...</div>
+        )}
+        {err && <div className="err-msg" style={{ margin: 24 }}>{err}</div>}
 
         {run && !loading && (
-          <div className="flex flex-col gap-4">
-            <RunMetaCard
+          <>
+            <RunMetaStrip
               run={run}
               onCancel={onCancel}
               onRetry={onRetry}
               acting={acting}
               actionErr={actionErr}
             />
-            <StagesCard stages={run.stages} runStatus={run.status} />
-            {accessToken && (
-              <LogsPanel runId={run.id} token={accessToken} runStatus={run.status} />
-            )}
-          </div>
+
+            <StageRail stages={run.stages} runStatus={run.status} />
+
+            <div className="rd-body">
+              <StepTreeSidebar
+                stages={run.stages}
+                runStatus={run.status}
+                selected={selected}
+                onSelect={setSelected}
+              />
+              <div className="rd-log-wrap">
+                <div className="rd-log-head">
+                  <span className="rd-log-crumb">
+                    {selected?.label || "等待中..."}
+                  </span>
+                  {accessToken && run.status === "running" && (
+                    <span className="rd-log-live">● 实时</span>
+                  )}
+                </div>
+                {accessToken && (
+                  <div className="rd-log-pane">
+                    <LogsPanel
+                      runId={run.id}
+                      token={accessToken}
+                      runStatus={run.status}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
         )}
       </div>
+
+      <style jsx>{`
+        .rd-root {
+          display: flex;
+          flex-direction: column;
+          /* AppShell header 高 52px, 让本页占满剩余视口 (而非依赖父级 flex 撑) */
+          min-height: calc(100vh - 52px);
+        }
+        .rd-loading {
+          padding: 24px;
+          font-size: 14px;
+          color: var(--fg-mute);
+        }
+        .rd-body {
+          flex: 1;
+          display: grid;
+          grid-template-columns: 280px 1fr;
+          min-height: 0;
+        }
+        @media (max-width: 900px) {
+          .rd-body {
+            grid-template-columns: 220px 1fr;
+          }
+        }
+        @media (max-width: 700px) {
+          .rd-body {
+            grid-template-columns: 1fr;
+          }
+        }
+        .rd-log-wrap {
+          display: flex;
+          flex-direction: column;
+          min-width: 0;
+          min-height: 0;
+        }
+        .rd-log-head {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 10px 16px;
+          border-bottom: 1px solid var(--border);
+          background: rgba(255, 255, 255, 0.01);
+          font-family: ui-monospace, Menlo, monospace;
+          font-size: 12px;
+          color: var(--fg-mute);
+        }
+        .rd-log-crumb {
+          flex: 1;
+        }
+        .rd-log-live {
+          font-size: 11px;
+          color: #60a5fa;
+          font-weight: 600;
+        }
+        .rd-log-pane {
+          flex: 1;
+          padding: 12px;
+          min-height: 0;
+          overflow: auto;
+        }
+      `}</style>
     </AppShell>
   );
 }
 
-function Breadcrumb({ run }: { run: RunDetail | null }) {
-  return (
-    <div className="mb-4 text-sm" style={{ color: "var(--fg-dim)" }}>
-      <Link href="/projects" className="hover:underline">项目</Link>
-      <span className="mx-2">/</span>
-      {run?.project ? (
-        <Link href={`/projects/${run.project.id}`} className="hover:underline">{run.project.name}</Link>
-      ) : (
-        <span>...</span>
-      )}
-      <span className="mx-2">/</span>
-      <span style={{ color: "var(--fg)" }}>{run ? `run #${run.number}` : "..."}</span>
-    </div>
-  );
-}
+// ========== 顶部 meta 条 ==========
 
-function StatusBadge({ status }: { status: string }) {
-  const c = statusBadgeColor(status);
-  return (
-    <span
-      style={{
-        color: c.fg,
-        background: c.bg,
-        padding: "3px 10px",
-        borderRadius: 999,
-        fontSize: "0.75rem",
-        fontWeight: 600,
-        textTransform: "lowercase",
-        letterSpacing: 0.3,
-      }}
-    >
-      {c.label}
-    </span>
-  );
-}
-
-function RunMetaCard({
+function RunMetaStrip({
   run,
   onCancel,
   onRetry,
@@ -194,108 +269,163 @@ function RunMetaCard({
   const isInFlight = run.status === "pending" || run.status === "running";
   const isTerminal =
     run.status === "success" || run.status === "failed" || run.status === "canceled";
+  const c = statusBadgeColor(run.status);
+
   return (
-    <div className="card flex flex-col gap-4">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-3 flex-wrap">
-            <h2 className="text-lg font-semibold">运行 #{run.number}</h2>
-            <StatusBadge status={run.status} />
-          </div>
-          {run.message && (
-            <div className="text-sm mt-2" style={{ color: "var(--fg-mute)" }}>{run.message}</div>
-          )}
-        </div>
-        <div className="text-xs text-right" style={{ color: "var(--fg-dim)" }}>
-          ID {run.id} · pipeline {run.pipeline_id} · v{run.version_id}
-        </div>
-      </div>
-
-      <div className="flex items-center gap-2 flex-wrap">
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={!isInFlight || acting !== null}
-          className="btn-action"
-          data-variant="warn"
-          title={isInFlight ? "取消运行" : "仅 pending/running 可取消"}
-        >
-          {acting === "cancel" ? "取消中..." : "取消"}
-        </button>
-        <button
-          type="button"
-          onClick={onRetry}
-          disabled={!isTerminal || acting !== null}
-          className="btn-action"
-          data-variant="primary"
-          title={isTerminal ? "复制并重新执行" : "仅终态 run 可重试"}
-        >
-          {acting === "retry" ? "提交中..." : "重试"}
-        </button>
-        {actionErr && (
-          <span
-            className="text-xs"
-            style={{ color: "#fb7185" }}
+    <div className="rd-meta">
+      <div className="rd-meta-top">
+        <span className="rd-pill" style={{ color: c.fg, background: c.bg }}>
+          <span className="rd-pill-dot" style={{ background: c.fg }} />
+          {c.label}
+        </span>
+        <span className="rd-num">#{run.number}</span>
+        <h1 className="rd-title">
+          {run.project?.name ?? `pipeline ${run.pipeline_id}`}
+        </h1>
+        <div className="rd-actions">
+          <button
+            type="button"
+            onClick={onRetry}
+            disabled={!isTerminal || acting !== null}
+            className="rd-btn"
+            data-variant="primary"
+            title={isTerminal ? "复制并重新执行" : "仅终态 run 可重试"}
           >
-            {actionErr}
-          </span>
-        )}
+            ↻ {acting === "retry" ? "提交中..." : "重新运行"}
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={!isInFlight || acting !== null}
+            className="rd-btn"
+            data-variant="warn"
+            title={isInFlight ? "取消运行" : "仅 pending/running 可取消"}
+          >
+            ⏹ {acting === "cancel" ? "取消中..." : "取消"}
+          </button>
+        </div>
       </div>
 
-      <div
-        className="grid gap-3"
-        style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}
-      >
-        <Meta label="分支">
-          <code className="meta-code">{run.branch || "-"}</code>
-        </Meta>
-        <Meta label="Commit">
-          <code className="meta-code">{shortSHA(run.commit_sha)}</code>
-        </Meta>
-        <Meta label="触发方式">
-          <span>{run.trigger_type || "-"}</span>
-        </Meta>
-        <Meta label="时长">
-          <span>{fmtDuration(run.duration_ms)}</span>
-        </Meta>
-        <Meta label="开始">
-          <span style={{ fontSize: "0.8125rem" }}>{fmtTime(run.started_at)}</span>
-        </Meta>
-        <Meta label="结束">
-          <span style={{ fontSize: "0.8125rem" }}>{fmtTime(run.finished_at)}</span>
-        </Meta>
+      <div className="rd-meta-row">
+        <span>
+          🌿 <code>{run.branch || "-"}</code>
+        </span>
+        <span>
+          📦 <code>{shortSHA(run.commit_sha) || "-"}</code>
+        </span>
+        <span>🎯 由 {run.trigger_type || "-"} 触发</span>
+        <span>⏱ {fmtRunTime(run)}</span>
+        <span className="rd-meta-id">
+          ID {run.id} · pipeline {run.pipeline_id} · v{run.version_id}
+        </span>
       </div>
+
+      {run.message && (
+        <div className="rd-meta-msg">{run.message}</div>
+      )}
+      {actionErr && (
+        <div className="rd-meta-err">{actionErr}</div>
+      )}
 
       <style jsx>{`
-        .meta-code {
-          background: var(--bg-elev-2);
-          padding: 2px 8px;
-          border-radius: 3px;
-          font-size: 0.8125rem;
+        .rd-meta {
+          padding: 18px 24px 14px;
+          border-bottom: 1px solid var(--border);
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
         }
-        .btn-action {
-          padding: 4px 12px;
-          border-radius: 4px;
-          font-size: 0.8125rem;
-          border: 1px solid var(--border);
-          background: var(--bg-elev-2);
+        .rd-meta-top {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          flex-wrap: wrap;
+        }
+        .rd-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 3px 10px;
+          font-size: 11px;
+          font-weight: 600;
+          border-radius: 9999px;
+          text-transform: lowercase;
+        }
+        .rd-pill-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+        }
+        .rd-num {
+          font-family: ui-monospace, Menlo, monospace;
+          color: var(--fg-dim);
+          font-size: 12px;
+        }
+        .rd-title {
+          font-size: 18px;
+          font-weight: 590;
           color: var(--fg);
+          margin: 0;
+        }
+        .rd-actions {
+          margin-left: auto;
+          display: flex;
+          gap: 8px;
+        }
+        .rd-btn {
+          padding: 4px 12px;
+          font-size: 12px;
+          font-weight: 510;
+          border-radius: 5px;
+          border: 1px solid var(--border);
+          background: rgba(255, 255, 255, 0.02);
+          color: var(--fg-mute);
           cursor: pointer;
           transition: background 0.15s, opacity 0.15s;
         }
-        .btn-action:hover:not(:disabled) {
-          background: var(--bg-elev);
+        .rd-btn:hover:not(:disabled) {
+          background: rgba(255, 255, 255, 0.05);
+          color: var(--fg);
         }
-        .btn-action:disabled {
+        .rd-btn:disabled {
           opacity: 0.4;
           cursor: not-allowed;
         }
-        .btn-action[data-variant="primary"]:not(:disabled) {
+        .rd-btn[data-variant="primary"]:not(:disabled) {
           border-color: rgba(96, 165, 250, 0.4);
           color: #60a5fa;
         }
-        .btn-action[data-variant="warn"]:not(:disabled) {
+        .rd-btn[data-variant="warn"]:not(:disabled) {
           border-color: rgba(251, 113, 133, 0.4);
+          color: #fb7185;
+        }
+        .rd-meta-row {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          flex-wrap: wrap;
+          color: var(--fg-mute);
+          font-size: 12px;
+        }
+        .rd-meta-row code {
+          font-family: ui-monospace, Menlo, monospace;
+          background: var(--bg-elev-2);
+          padding: 1px 6px;
+          border-radius: 3px;
+          font-size: 11px;
+        }
+        .rd-meta-id {
+          margin-left: auto;
+          color: var(--fg-dim);
+          font-size: 11px;
+        }
+        .rd-meta-msg {
+          font-size: 13px;
+          color: var(--fg-mute);
+          margin-top: 2px;
+        }
+        .rd-meta-err {
+          font-size: 12px;
           color: #fb7185;
         }
       `}</style>
@@ -303,98 +433,371 @@ function RunMetaCard({
   );
 }
 
-function Meta({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="text-xs" style={{ color: "var(--fg-dim)" }}>{label}</span>
-      <span className="text-sm" style={{ color: "var(--fg)" }}>{children}</span>
-    </div>
-  );
-}
+// ========== 水平 stage rail ==========
 
-function StagesCard({ stages, runStatus }: { stages: Stage[]; runStatus: string }) {
-  if (stages.length === 0) {
-    return (
-      <div
-        className="card text-sm"
-        style={{ color: "var(--fg-dim)" }}
-      >
-        <div className="mb-1" style={{ color: "var(--fg-mute)", fontWeight: 600 }}>阶段</div>
-        {runStatus === "pending"
-          ? "等待执行..."
-          : "M1 阶段简化引擎暂未写 stage 细节(整体 run 状态即可代表)。多 stage/step 树将在 M2 接入。"}
-      </div>
-    );
-  }
+function StageRail({
+  stages,
+  runStatus,
+}: {
+  stages: Stage[];
+  runStatus: string;
+}) {
+  // M1 简化引擎常 0 stages, 用 run 状态生成虚拟单节点 build
+  const items = useMemo(() => {
+    if (stages.length > 0) {
+      return stages.map((s) => ({
+        key: String(s.id),
+        label: s.name || s.stage_id,
+        status: s.status || "pending",
+        duration: fmtDuration(s.duration_ms),
+      }));
+    }
+    return [
+      {
+        key: "virtual-build",
+        label: "build",
+        status: runStatus,
+        duration: "",
+      },
+    ];
+  }, [stages, runStatus]);
+
   return (
-    <div className="card flex flex-col gap-3">
-      <div className="text-sm" style={{ color: "var(--fg-mute)", fontWeight: 600 }}>阶段</div>
-      <div className="flex flex-col gap-2">
-        {stages.map((s) => (
-          <StageRow key={s.id} s={s} />
+    <div className="rd-rail-wrap">
+      <div className="rd-rail">
+        {items.map((it, i) => (
+          <RailNode key={it.key} item={it} last={i === items.length - 1} />
         ))}
       </div>
+
+      <style jsx>{`
+        .rd-rail-wrap {
+          padding: 14px 24px;
+          border-bottom: 1px solid var(--border);
+          overflow-x: auto;
+        }
+        .rd-rail {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          min-width: max-content;
+        }
+      `}</style>
     </div>
   );
 }
 
-function StageRow({ s }: { s: Stage }) {
-  const [open, setOpen] = useState(false);
+function RailNode({
+  item,
+  last,
+}: {
+  item: { key: string; label: string; status: string; duration: string };
+  last: boolean;
+}) {
+  const tone = railTone(item.status);
   return (
-    <div
-      style={{
-        border: "1px solid var(--border)",
-        borderRadius: 6,
-        background: "var(--bg-elev-2)",
-      }}
-    >
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-3 px-3 py-2 text-left"
-        style={{ color: "var(--fg)" }}
-      >
-        <span style={{ color: "var(--fg-dim)", fontSize: "0.75rem", width: 14 }}>
-          {open ? "▾" : "▸"}
-        </span>
-        <StatusBadge status={s.status || ""} />
-        <span className="font-medium">{s.name || s.stage_id}</span>
-        <span className="ml-auto text-xs" style={{ color: "var(--fg-dim)" }}>
-          {fmtDuration(s.duration_ms)}
-        </span>
-      </button>
-      {open && (
-        <div className="px-3 pb-3 pt-1">
-          {s.steps.length === 0 ? (
-            <div className="text-xs pl-6" style={{ color: "var(--fg-dim)" }}>(无 step 记录)</div>
-          ) : (
-            <div className="flex flex-col gap-1">
-              {s.steps.map((st) => (
-                <StepRow key={st.id} st={st} />
-              ))}
-            </div>
+    <>
+      <div className="rd-stg">
+        <span className="rd-stgd" data-tone={tone} />
+        <div className="rd-stgl">
+          {item.label}
+          {(item.duration || isTransient(item.status)) && (
+            <span className="rd-stgt">
+              {item.duration}
+              {isTransient(item.status) && (item.duration ? " · " : "") + statusText(item.status)}
+            </span>
           )}
         </div>
-      )}
-    </div>
+      </div>
+      {!last && <div className="rd-stgn" data-tone={tone === "ok" ? "ok" : "dm"} />}
+
+      <style jsx>{`
+        .rd-stg {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 6px;
+          min-width: 120px;
+        }
+        .rd-stgd {
+          width: 14px;
+          height: 14px;
+          border-radius: 50%;
+          background: var(--fg-dim);
+          border: 2px solid var(--bg);
+        }
+        .rd-stgd[data-tone="ok"] {
+          background: #27a644;
+        }
+        .rd-stgd[data-tone="rn"] {
+          background: #3b82f6;
+          box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.2);
+          animation: pl 1.5s infinite;
+        }
+        .rd-stgd[data-tone="dn"] {
+          background: #ef4444;
+        }
+        .rd-stgd[data-tone="wn"] {
+          background: #f59e0b;
+        }
+        .rd-stgl {
+          font-size: 11px;
+          color: var(--fg-mute);
+          text-align: center;
+          white-space: nowrap;
+        }
+        .rd-stgt {
+          display: block;
+          font-size: 10px;
+          color: var(--fg-dim);
+          margin-top: 2px;
+        }
+        .rd-stgn {
+          flex: 1;
+          height: 2px;
+          background: var(--fg-dim);
+          min-width: 30px;
+        }
+        .rd-stgn[data-tone="ok"] {
+          background: #27a644;
+        }
+        .rd-stgn[data-tone="dm"] {
+          background: rgba(255, 255, 255, 0.08);
+        }
+        @keyframes pl {
+          0%,
+          100% {
+            opacity: 1;
+          }
+          50% {
+            opacity: 0.4;
+          }
+        }
+      `}</style>
+    </>
   );
 }
 
-function StepRow({ st }: { st: Step }) {
+// ========== 左侧 stage/step 树 ==========
+
+function StepTreeSidebar({
+  stages,
+  runStatus,
+  selected,
+  onSelect,
+}: {
+  stages: Stage[];
+  runStatus: string;
+  selected: SelectedStep | null;
+  onSelect: (s: SelectedStep) => void;
+}) {
+  // 0 stage 时生成虚拟节点
+  const virtualMode = stages.length === 0;
+
   return (
-    <div
-      className="flex items-center gap-3 px-2 py-1.5 text-sm"
-      style={{ borderRadius: 4, background: "var(--bg-elev)" }}
-    >
-      <StatusBadge status={st.status || ""} />
-      <span style={{ color: "var(--fg)" }}>{st.name || `step #${st.id}`}</span>
-      {st.exit_code != null && (
-        <span className="text-xs" style={{ color: "var(--fg-dim)" }}>
-          exit {st.exit_code}
-        </span>
+    <aside className="rd-side">
+      <div className="rd-side-title">阶段 / 步骤</div>
+
+      {virtualMode ? (
+        <div
+          className={`rd-stx${selected?.stepId === 0 ? " sel" : ""}`}
+          data-tone={runStatus}
+          onClick={() =>
+            onSelect({ stageId: 0, stepId: 0, label: "build" })
+          }
+        >
+          <span className="rd-stx-mark">{markFor(runStatus)}</span>
+          <span className="rd-stx-name">build</span>
+          <span className="rd-stx-tm">{statusText(runStatus)}</span>
+        </div>
+      ) : (
+        stages.map((s) => (
+          <div key={s.id} className="rd-stage-group">
+            <div className="rd-stx" data-tone={s.status}>
+              <span className="rd-stx-mark">{markFor(s.status || "")}</span>
+              <span className="rd-stx-name">{s.name || s.stage_id}</span>
+              <span className="rd-stx-tm">{fmtDuration(s.duration_ms)}</span>
+            </div>
+            {s.steps.map((st) => {
+              const isSel = selected?.stepId === st.id;
+              return (
+                <div
+                  key={st.id}
+                  className={`rd-stx child${isSel ? " sel" : ""}`}
+                  data-tone={st.status}
+                  onClick={() =>
+                    onSelect({
+                      stageId: s.id,
+                      stepId: st.id,
+                      label: `${s.name || s.stage_id} › ${st.name || `step #${st.id}`}`,
+                    })
+                  }
+                >
+                  <span className="rd-stx-mark">{markFor(st.status || "")}</span>
+                  <span className="rd-stx-name">{st.name || `step #${st.id}`}</span>
+                  <span className="rd-stx-tm">{fmtDuration(st.duration_ms)}</span>
+                </div>
+              );
+            })}
+          </div>
+        ))
       )}
-      <span className="ml-auto text-xs" style={{ color: "var(--fg-dim)" }}>
-        {fmtDuration(st.duration_ms)}
-      </span>
-    </div>
+
+      <style jsx>{`
+        .rd-side {
+          border-right: 1px solid var(--border);
+          overflow-y: auto;
+          padding: 14px 10px;
+          background: var(--bg-elev);
+        }
+        .rd-side-title {
+          font-size: 11px;
+          font-weight: 510;
+          color: var(--fg-dim);
+          text-transform: uppercase;
+          letter-spacing: 0.4px;
+          padding: 0 8px 10px;
+        }
+        .rd-stage-group {
+          margin-bottom: 6px;
+        }
+        :global(.rd-stx) {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 6px 10px;
+          font-size: 12px;
+          color: var(--fg-mute);
+          border-radius: 5px;
+          cursor: pointer;
+          transition: background 0.12s;
+        }
+        :global(.rd-stx:hover) {
+          background: rgba(255, 255, 255, 0.03);
+          color: var(--fg);
+        }
+        :global(.rd-stx.child) {
+          padding-left: 22px;
+          font-size: 11px;
+        }
+        :global(.rd-stx.sel) {
+          background: var(--accent-soft);
+          color: var(--fg);
+        }
+        :global(.rd-stx[data-tone="success"]) {
+          color: #86efac;
+        }
+        :global(.rd-stx[data-tone="running"]) {
+          color: #93c5fd;
+        }
+        :global(.rd-stx[data-tone="failed"]) {
+          color: #fca5a5;
+        }
+        :global(.rd-stx[data-tone="pending"]) {
+          color: var(--fg-dim);
+        }
+        :global(.rd-stx-mark) {
+          width: 14px;
+          display: inline-block;
+          text-align: center;
+        }
+        :global(.rd-stx-name) {
+          flex: 1;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        :global(.rd-stx-tm) {
+          margin-left: auto;
+          font-size: 10px;
+          color: var(--fg-dim);
+          font-family: ui-monospace, Menlo, monospace;
+        }
+      `}</style>
+    </aside>
   );
 }
+
+// ========== 工具 ==========
+
+function railTone(status: string): "ok" | "rn" | "dn" | "wn" | "pd" {
+  switch (status) {
+    case "success":
+      return "ok";
+    case "running":
+      return "rn";
+    case "failed":
+    case "canceled":
+      return "dn";
+    case "pending":
+      return "pd";
+    default:
+      return "pd";
+  }
+}
+
+function markFor(status: string): string {
+  switch (status) {
+    case "success":
+      return "✓";
+    case "running":
+      return "●";
+    case "failed":
+      return "✗";
+    case "canceled":
+      return "⊘";
+    case "pending":
+      return "○";
+    default:
+      return "○";
+  }
+}
+
+function statusText(status: string): string {
+  switch (status) {
+    case "success":
+      return "完成";
+    case "running":
+      return "运行中";
+    case "failed":
+      return "失败";
+    case "canceled":
+      return "已取消";
+    case "pending":
+      return "等待";
+    default:
+      return status;
+  }
+}
+
+function isTransient(status: string): boolean {
+  return status === "running" || status === "pending";
+}
+
+function firstSelectableStep(stages: Stage[]): SelectedStep | null {
+  for (const s of stages) {
+    if (s.steps.length > 0) {
+      const st = s.steps[0];
+      return {
+        stageId: s.id,
+        stepId: st.id,
+        label: `${s.name || s.stage_id} › ${st.name || `step #${st.id}`}`,
+      };
+    }
+  }
+  if (stages.length > 0) {
+    return null;
+  }
+  // virtual fallback: build
+  return { stageId: 0, stepId: 0, label: "build" };
+}
+
+function fmtRunTime(run: RunDetail): string {
+  if (run.duration_ms) return `时长 ${fmtDuration(run.duration_ms)}`;
+  if (run.started_at) return `开始于 ${fmtTime(run.started_at)}`;
+  if (run.created_at) return `创建于 ${fmtTime(run.created_at)}`;
+  return "-";
+}
+
+// 兼容旧 import (避免破坏其他文件) — 仅声明类型
+export type _RunDetailKeepStep = Step;
