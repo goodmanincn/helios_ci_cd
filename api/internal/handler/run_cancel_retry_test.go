@@ -43,8 +43,10 @@ func newCommittedFixture(t *testing.T, gdb *gorm.DB, status string) runFixture {
 	t.Helper()
 	fx := seedRun(t, gdb, status, false)
 	t.Cleanup(func() {
-		// 倒序删 (run 包含 retry 新建的可能, 按 pipeline_id 清)
-		_ = gdb.Exec("DELETE FROM audit_logs WHERE entity_type='run' AND entity_id IN (SELECT id FROM runs WHERE pipeline_id=?)", fx.PipelineID).Error
+		// 倒序删 (run 包含 retry 新建的可能, 按 pipeline_id 清; approval 表跟 run on-delete cascade)
+		_ = gdb.Exec("DELETE FROM approvals WHERE request_id IN (SELECT id FROM approval_requests WHERE run_id IN (SELECT id FROM runs WHERE pipeline_id=?))", fx.PipelineID).Error
+		_ = gdb.Exec("DELETE FROM approval_requests WHERE run_id IN (SELECT id FROM runs WHERE pipeline_id=?)", fx.PipelineID).Error
+		_ = gdb.Exec("DELETE FROM audit_logs WHERE resource_type='run' AND resource_id IN (SELECT id FROM runs WHERE pipeline_id=?)", fx.PipelineID).Error
 		_ = gdb.Exec("DELETE FROM stages WHERE run_id IN (SELECT id FROM runs WHERE pipeline_id=?)", fx.PipelineID).Error
 		_ = gdb.Exec("DELETE FROM runs WHERE pipeline_id=?", fx.PipelineID).Error
 		_ = gdb.Exec("DELETE FROM pipeline_versions WHERE pipeline_id=?", fx.PipelineID).Error

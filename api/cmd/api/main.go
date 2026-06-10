@@ -143,10 +143,12 @@ func main() {
 	protected := v1.Group("")
 	protected.Use(authMW)
 	projectH.Register(protected)
-	handler.NewRunHandler(gdb).WithRunControl(runMachine, enq).Register(protected)
+	approvalSvc := service.NewApprovalService(gdb, runMachine)
+	handler.NewRunHandler(gdb).WithRunControl(runMachine, enq).WithApproval(approvalSvc).Register(protected)
 	handler.NewMeHandler(gdb).Register(protected)
 	handler.NewPipelineHandler().Register(protected)
 	handler.NewSecretHandler(gdb, vault).Register(protected)
+	handler.NewApprovalHandler(approvalSvc).Register(protected)
 
 	addr := os.Getenv("HELIOS_API_ADDR")
 	if addr == "" {

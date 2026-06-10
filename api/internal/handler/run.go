@@ -27,6 +27,7 @@ import (
 
 	"github.com/helios-cicd/helios/api/internal/middleware"
 	"github.com/helios-cicd/helios/api/internal/model"
+	"github.com/helios-cicd/helios/api/internal/service"
 	"github.com/helios-cicd/helios/api/pkg/runstate"
 	"github.com/helios-cicd/helios/api/pkg/tasks"
 )
@@ -39,9 +40,10 @@ type Enqueuer interface {
 
 // RunHandler runs 资源端点。
 type RunHandler struct {
-	db      *gorm.DB
-	machine *runstate.Machine // 可空 → cancel 返 503
-	enq     Enqueuer          // 可空 → retry 返 503
+	db       *gorm.DB
+	machine  *runstate.Machine // 可空 → cancel 返 503
+	enq      Enqueuer          // 可空 → retry 返 503
+	approval ApprovalLister    // 可空 → detail 不带 approval 字段
 }
 
 // NewRunHandler 构造。machine/enq 都可空 (T1.6.1 阶段只读取时调用方传 nil)。
@@ -53,6 +55,12 @@ func NewRunHandler(db *gorm.DB) *RunHandler {
 func (h *RunHandler) WithRunControl(m *runstate.Machine, enq Enqueuer) *RunHandler {
 	h.machine = m
 	h.enq = enq
+	return h
+}
+
+// WithApproval 注入审批 lister, 让 GET /runs/:id 详情携带 approval_requests.
+func (h *RunHandler) WithApproval(svc ApprovalLister) *RunHandler {
+	h.approval = svc
 	return h
 }
 
@@ -115,9 +123,10 @@ type runListItemDTO struct {
 
 type runDetailDTO struct {
 	runListItemDTO
-	PipelineID int64      `json:"pipeline_id"`
-	VersionID  int64      `json:"version_id"`
-	Stages     []stageDTO `json:"stages"`
+	PipelineID       int64                      `json:"pipeline_id"`
+	VersionID        int64                      `json:"version_id"`
+	Stages           []stageDTO                 `json:"stages"`
+	ApprovalRequests []service.ApprovalSummary  `json:"approval_requests,omitempty"`
 }
 
 // ===== list =====
@@ -255,6 +264,14 @@ func (h *RunHandler) detail(c *gin.Context) {
 		PipelineID:     run.PipelineID,
 		VersionID:      run.VersionID,
 		Stages:         stageDTOs,
+	}
+	// approval_requests 内嵌 (T2.6.2). lister 空或查错都不阻塞详情返回.
+	if h.approval != nil {
+		if list, aerr := h.approval.ListByRun(ctx, rid); aerr != nil {
+			log.Printf("[run] load approval requests run=%d err=%v", rid, aerr)
+		} else if len(list) > 0 {
+			resp.ApprovalRequests = list
+		}
 	}
 	c.JSON(http.StatusOK, resp)
 }
