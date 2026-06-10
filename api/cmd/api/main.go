@@ -21,12 +21,14 @@ import (
 	"github.com/helios-cicd/helios/api/internal/authstore"
 	"github.com/helios-cicd/helios/api/internal/db"
 	"github.com/helios-cicd/helios/api/internal/handler"
+	logsh "github.com/helios-cicd/helios/api/internal/handler/logs"
 	webhookh "github.com/helios-cicd/helios/api/internal/handler/webhook"
 	"github.com/helios-cicd/helios/api/internal/middleware"
 	"github.com/helios-cicd/helios/api/internal/repository"
 	"github.com/helios-cicd/helios/api/internal/service"
 	"github.com/helios-cicd/helios/api/pkg/git"
 	heliosjwt "github.com/helios-cicd/helios/api/pkg/jwt"
+	"github.com/helios-cicd/helios/api/pkg/logstream"
 	"github.com/helios-cicd/helios/api/pkg/queue"
 )
 
@@ -84,6 +86,7 @@ func main() {
 		Token: os.Getenv("HELIOS_GITHUB_TOKEN"), // 可空,目前 webhook 接收不需要 token
 	})
 	webhookH := webhookh.NewGitHubHandler(webhookh.NewGormRunStore(gdb), gh, enq, os.Getenv("HELIOS_WEBHOOK_DEV_SECRET"))
+	logsH := logsh.New(logstream.NewReader(rdb), issuer)
 	authMW := middleware.RequireAuth(middleware.AuthDeps{Issuer: issuer, Authstore: store})
 
 	// ===== 路由 =====
@@ -109,6 +112,9 @@ func main() {
 
 	// Webhook 端点 — 公开 (走 HMAC 签名校验,不能加 auth 中间件)
 	webhookH.Register(v1)
+
+	// 日志端点 — 公开 (内部 ?token= 自校, M1 dev 允许匿名)
+	logsH.Register(v1)
 
 	// 项目资源 — 全部需要登录
 	protected := v1.Group("")
