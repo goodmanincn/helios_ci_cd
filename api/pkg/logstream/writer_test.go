@@ -108,9 +108,10 @@ func TestWriter_MaxLenApprox(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Len: %v", err)
 	}
-	// approx trimming 可能略超, redis 文档 ~ 不保证精确. 给上界 1.5x.
-	if got > 150 {
-		t.Errorf("Len=%d want ~100 (≤150 lenient)", got)
+	// approx trimming 可能略超, redis 文档 ~ 不保证精确, 实际看 listpack 节点容量,
+	// 1.5x 不够稳定 (实测见过 159), 提到 2x 给足缓冲. 真正爆掉是 MAXLEN 大小 + 内存关系不是此处验的.
+	if got > 200 {
+		t.Errorf("Len=%d want ~100 (≤200 lenient)", got)
 	}
 	if got < 50 {
 		t.Errorf("Len=%d trimmed too aggressively", got)
