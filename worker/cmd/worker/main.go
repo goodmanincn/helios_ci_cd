@@ -15,6 +15,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/helios-cicd/helios/api/pkg/git"
+	"github.com/helios-cicd/helios/api/pkg/logarchive"
 	"github.com/helios-cicd/helios/api/pkg/logstream"
 	"github.com/helios-cicd/helios/api/pkg/projectrepo"
 	"github.com/helios-cicd/helios/api/pkg/queue"
@@ -72,8 +73,23 @@ func main() {
 	logsWriter := logstream.NewWriter(logsRedis, logstream.Config{MaxLen: 10000})
 	log.Printf("worker logstream redis=%s maxlen=10000", redisAddr)
 
+	// T1.5.3: 日志归档服务 (本地文件, M2 加 MinIO).
+	archiveRoot := envOr("HELIOS_LOG_ARCHIVE_DIR", "/tmp/helios/logs")
+	if err := os.MkdirAll(archiveRoot, 0o755); err != nil {
+		log.Fatalf("mkdir archive root %s: %v", archiveRoot, err)
+	}
+	archiveSvc := &logarchive.Service{
+		Reader:  logstream.NewReader(logsRedis),
+		Writer:  logsWriter,
+		Backend: logarchive.NewLocalFS(archiveRoot),
+	}
+	log.Printf("worker logarchive backend=localfs root=%s", archiveRoot)
+
 	// runtime 选择: HELIOS_BUILD_RUNTIME = host (默认) | docker
-	buildOpts := []handler.BuildOption{handler.WithLogStream(logsWriter)}
+	buildOpts := []handler.BuildOption{
+		handler.WithLogStream(logsWriter),
+		handler.WithLogArchive(archiveSvc),
+	}
 	runtime := envOr("HELIOS_BUILD_RUNTIME", "host")
 	switch runtime {
 	case "docker":

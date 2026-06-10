@@ -34,6 +34,7 @@ import (
 
 	"github.com/hibiken/asynq"
 
+	"github.com/helios-cicd/helios/api/pkg/logarchive"
 	"github.com/helios-cicd/helios/api/pkg/logstream"
 	"github.com/helios-cicd/helios/api/pkg/projectrepo"
 	"github.com/helios-cicd/helios/api/pkg/runstate"
@@ -62,7 +63,8 @@ type BuildHandler struct {
 	runtime  BuildRuntime
 	executor *dockerrun.Executor // runtime=docker 时必填; runtime=host 时可 nil
 
-	logs *logstream.Writer // T1.5.1: 双写 Redis Stream, nil 时仅写本地 build.log
+	logs    *logstream.Writer  // T1.5.1: 双写 Redis Stream, nil 时仅写本地 build.log
+	archive *logarchive.Service // T1.5.3: 终态后归档 Redis Stream → 持久存储 + 删 Redis; nil 跳过
 }
 
 // BuildOption 配置项。
@@ -80,6 +82,12 @@ func WithDockerRuntime(ex *dockerrun.Executor) BuildOption {
 // 不传 → 只写本地 build.log (向后兼容)。
 func WithLogStream(w *logstream.Writer) BuildOption {
 	return func(h *BuildHandler) { h.logs = w }
+}
+
+// WithLogArchive 注入日志归档服务, run 终态后 best-effort 把 Redis Stream 序列化到持久存储并删 Redis。
+// 不传 → 不归档 (Redis Stream 留着, 受 MAXLEN 限制).
+func WithLogArchive(s *logarchive.Service) BuildOption {
+	return func(h *BuildHandler) { h.archive = s }
 }
 
 // NewBuild 构造。workspaceDir 与 checkout handler 必须一致。
@@ -244,6 +252,7 @@ func (h *BuildHandler) ProcessTask(ctx context.Context, t *asynq.Task) error {
 		if h.logs != nil {
 			h.logs.AppendSystem(ctx, p.RunID, "[FAILED] "+reason)
 		}
+		h.archiveBestEffort(ctx, p.RunID)
 		return nil // 不重试: user-command 错
 	}
 
@@ -255,7 +264,29 @@ func (h *BuildHandler) ProcessTask(ctx context.Context, t *asynq.Task) error {
 	if h.logs != nil {
 		h.logs.AppendSystem(ctx, p.RunID, "[SUCCESS] build_command succeeded")
 	}
+	h.archiveBestEffort(ctx, p.RunID)
 	return nil
+}
+
+// archiveBestEffort 把 Redis Stream 序列化到持久存储并删 Redis. 任何错只 log, 不阻断 run.
+// 用独立 timeout context, 不受 build runCtx 取消影响.
+func (h *BuildHandler) archiveBestEffort(parent context.Context, runID int64) {
+	if h.archive == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	stat, err := h.archive.ArchiveAndDrop(ctx, runID)
+	if err != nil {
+		log.Printf("logarchive: run=%d failed: %v", runID, err)
+		return
+	}
+	if stat.Skipped {
+		log.Printf("logarchive: run=%d skipped (empty stream)", runID)
+		return
+	}
+	log.Printf("logarchive: run=%d archived %d entries → %s (%s)",
+		runID, stat.Entries, stat.Key, stat.Backend)
 }
 
 // runHost 走 host bash -c (E1.3 MVP 路径)。
