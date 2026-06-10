@@ -40,6 +40,7 @@ const terminal: Record<string, true> = {
   success: true,
   failed: true,
   canceled: true,
+  timeout: true,
 };
 
 export function LogsPanel({ runId, token, runStatus }: Props) {

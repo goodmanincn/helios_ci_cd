@@ -1,7 +1,14 @@
 // Runs API — 复用 apiFetch (T1.6.1 后端: GET /api/v1/runs, /api/v1/runs/:id)
 import { apiFetch } from "./api";
 
-export type RunStatus = "pending" | "running" | "success" | "failed" | "canceled";
+export type RunStatus =
+  | "pending"
+  | "running"
+  | "approval"
+  | "success"
+  | "failed"
+  | "canceled"
+  | "timeout";
 
 export interface ProjectSummary {
   id: number;
@@ -35,6 +42,33 @@ export interface Stage {
   steps: Step[];
 }
 
+// T2.6.4: 审批 (E2.6)
+export type ApprovalStatus = "pending" | "approved" | "rejected" | "timeout" | "canceled";
+
+export interface ApprovalVote {
+  id: number;
+  request_id: number;
+  user_id?: number;
+  username: string;
+  decision: "approve" | "reject";
+  comment?: string;
+  created_at: string;
+}
+
+export interface ApprovalRequest {
+  id: number;
+  run_id: number;
+  stage_id: string;
+  required_approvers: string[];
+  mode: "any" | "all";
+  status: ApprovalStatus;
+  on_timeout: "reject" | "approve" | "pause";
+  timeout_at?: string;
+  created_at: string;
+  updated_at: string;
+  approvals: ApprovalVote[];
+}
+
 export interface RunListItem {
   id: number;
   number: number;
@@ -54,6 +88,7 @@ export interface RunDetail extends RunListItem {
   pipeline_id: number;
   version_id: number;
   stages: Stage[];
+  approval_requests?: ApprovalRequest[];
 }
 
 export interface RunListResult {
@@ -115,6 +150,40 @@ export async function retryRun(token: string, id: number): Promise<RetryResult> 
   });
 }
 
+// T2.6.4: 审批投票
+export interface ApprovalVoteResult {
+  request_id: number;
+  request_status: ApprovalStatus;
+  vote_id: number;
+  decision: "approve" | "reject";
+  username: string;
+  next_run_status: string; // "" / "running" / "failed"
+}
+
+export async function approveStage(
+  token: string,
+  runId: number,
+  stageId: string,
+  comment: string,
+): Promise<ApprovalVoteResult> {
+  return apiFetch<ApprovalVoteResult>(
+    `/api/v1/runs/${runId}/approvals/${encodeURIComponent(stageId)}/approve`,
+    { token, method: "POST", body: JSON.stringify({ comment }) },
+  );
+}
+
+export async function rejectStage(
+  token: string,
+  runId: number,
+  stageId: string,
+  comment: string,
+): Promise<ApprovalVoteResult> {
+  return apiFetch<ApprovalVoteResult>(
+    `/api/v1/runs/${runId}/approvals/${encodeURIComponent(stageId)}/reject`,
+    { token, method: "POST", body: JSON.stringify({ comment }) },
+  );
+}
+
 // ===== UI helpers =====
 
 export function statusBadgeColor(s: string): { fg: string; bg: string; label: string } {
@@ -123,10 +192,14 @@ export function statusBadgeColor(s: string): { fg: string; bg: string; label: st
       return { fg: "#5eecaa", bg: "rgba(34,197,94,0.14)", label: "成功" };
     case "running":
       return { fg: "#fbd55a", bg: "rgba(250,204,21,0.14)", label: "运行中" };
+    case "approval":
+      return { fg: "#facc15", bg: "rgba(250,204,21,0.14)", label: "待审批" };
     case "pending":
       return { fg: "#9aa5b3", bg: "rgba(148,163,184,0.16)", label: "排队中" };
     case "failed":
       return { fg: "#fb7185", bg: "rgba(248,113,113,0.14)", label: "失败" };
+    case "timeout":
+      return { fg: "#fb923c", bg: "rgba(251,146,60,0.14)", label: "超时" };
     case "canceled":
       return { fg: "#a1a1aa", bg: "rgba(161,161,170,0.14)", label: "已取消" };
     default:

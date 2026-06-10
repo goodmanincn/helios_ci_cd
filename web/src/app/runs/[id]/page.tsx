@@ -19,6 +19,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/auth-store";
 import { AuthGuard } from "@/components/auth-guard";
 import { AppShell } from "@/components/app-shell";
+import { ApprovalPanel } from "@/components/approval-panel";
 import { LogsPanel } from "@/components/logs-panel";
 import { ApiException } from "@/lib/api";
 import {
@@ -109,14 +110,18 @@ function RunDetailInner() {
     load();
   }, [load]);
 
-  // running/pending 时轮询 5s
+  // running/pending/approval 时轮询 5s
   useEffect(() => {
     if (pollRef.current) {
       clearInterval(pollRef.current);
       pollRef.current = null;
     }
     if (!run) return;
-    if (run.status === "running" || run.status === "pending") {
+    if (
+      run.status === "running" ||
+      run.status === "pending" ||
+      run.status === "approval"
+    ) {
       pollRef.current = setInterval(load, 5000);
     }
     return () => {
@@ -153,6 +158,14 @@ function RunDetailInner() {
               acting={acting}
               actionErr={actionErr}
             />
+
+            {run.status === "approval" && run.approval_requests && run.approval_requests.length > 0 && (
+              <ApprovalPanel
+                runId={run.id}
+                requests={run.approval_requests}
+                onChanged={load}
+              />
+            )}
 
             <StageRail stages={run.stages} runStatus={run.status} />
 
@@ -266,9 +279,13 @@ function RunMetaStrip({
   acting: "cancel" | "retry" | null;
   actionErr: string | null;
 }) {
-  const isInFlight = run.status === "pending" || run.status === "running";
+  const isInFlight =
+    run.status === "pending" || run.status === "running" || run.status === "approval";
   const isTerminal =
-    run.status === "success" || run.status === "failed" || run.status === "canceled";
+    run.status === "success" ||
+    run.status === "failed" ||
+    run.status === "canceled" ||
+    run.status === "timeout";
   const c = statusBadgeColor(run.status);
 
   return (
@@ -729,6 +746,10 @@ function railTone(status: string): "ok" | "rn" | "dn" | "wn" | "pd" {
     case "failed":
     case "canceled":
       return "dn";
+    case "approval":
+      return "wn";
+    case "timeout":
+      return "dn";
     case "pending":
       return "pd";
     default:
@@ -746,6 +767,10 @@ function markFor(status: string): string {
       return "✗";
     case "canceled":
       return "⊘";
+    case "approval":
+      return "👤";
+    case "timeout":
+      return "⏱";
     case "pending":
       return "○";
     default:
@@ -763,6 +788,10 @@ function statusText(status: string): string {
       return "失败";
     case "canceled":
       return "已取消";
+    case "approval":
+      return "待审批";
+    case "timeout":
+      return "超时";
     case "pending":
       return "等待";
     default:
