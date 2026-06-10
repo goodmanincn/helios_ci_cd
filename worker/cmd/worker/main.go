@@ -19,6 +19,7 @@ import (
 	"github.com/helios-cicd/helios/api/pkg/runrepo"
 	"github.com/helios-cicd/helios/api/pkg/runstate"
 	"github.com/helios-cicd/helios/api/pkg/tasks"
+	"github.com/helios-cicd/helios/worker/internal/dockerrun"
 	"github.com/helios-cicd/helios/worker/internal/gitrunner"
 	"github.com/helios-cicd/helios/worker/internal/handler"
 )
@@ -62,7 +63,32 @@ func main() {
 		}
 	}
 	projRepo := projectrepo.New(db)
-	buildH := handler.NewBuild(projRepo, machine, workspaceDir, buildTimeout)
+
+	// runtime 选择: HELIOS_BUILD_RUNTIME = host (默认) | docker
+	buildOpts := []handler.BuildOption{}
+	runtime := envOr("HELIOS_BUILD_RUNTIME", "host")
+	switch runtime {
+	case "docker":
+		dctx, dcancel := context.WithTimeout(context.Background(), 5*time.Second)
+		dc, derr := dockerrun.New(dctx, dockerrun.ClientConfig{
+			Host:          os.Getenv("DOCKER_HOST"),
+			NegotiateOnce: true,
+			RequestTO:     30 * time.Second,
+		})
+		dcancel()
+		if derr != nil {
+			log.Fatalf("HELIOS_BUILD_RUNTIME=docker but docker unreachable: %v", derr)
+		}
+		log.Printf("worker build runtime=docker (host=%s)", dc.Host())
+		buildOpts = append(buildOpts, handler.WithDockerRuntime(dockerrun.NewExecutor(dc)))
+		defer func() { _ = dc.Close() }()
+	case "host":
+		log.Printf("worker build runtime=host (set HELIOS_BUILD_RUNTIME=docker to use containers)")
+	default:
+		log.Fatalf("HELIOS_BUILD_RUNTIME=%q invalid, want host|docker", runtime)
+	}
+
+	buildH := handler.NewBuild(projRepo, machine, workspaceDir, buildTimeout, buildOpts...)
 	ghProvider := git.NewGitHubProvider(git.GitHubConfig{
 		Token: os.Getenv("HELIOS_GITHUB_TOKEN"),
 	})
