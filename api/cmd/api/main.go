@@ -139,6 +139,7 @@ func main() {
 	protected.Use(authMW)
 	projectH.Register(protected)
 	handler.NewRunHandler(gdb).WithRunControl(runMachine, enq).Register(protected)
+	handler.NewMeHandler(gdb).Register(protected)
 
 	addr := os.Getenv("HELIOS_API_ADDR")
 	if addr == "" {
