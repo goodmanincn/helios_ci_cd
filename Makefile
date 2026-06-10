@@ -38,12 +38,21 @@ help:  ## 显示帮助
 
 # === 环境 ===
 .PHONY: setup
-setup:  ## 首次环境准备 (复制 .env / 安装 hooks)
+setup:  ## 首次环境准备 (复制 .env / 安装 hooks / 装 web 依赖)
 	@test -f .env || cp .env.example .env && echo "✓ .env 已创建,请按需修改"
 	@command -v golangci-lint >/dev/null 2>&1 || (echo "→ 安装 golangci-lint" && go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest)
 	@command -v gofumpt >/dev/null 2>&1 || (echo "→ 安装 gofumpt" && go install mvdan.cc/gofumpt@latest)
 	@command -v migrate >/dev/null 2>&1 || (echo "→ 安装 golang-migrate (--> \$$GOPATH/bin)" && GOBIN=$$(go env GOPATH)/bin go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1)
+	@if [ -d web ] && [ ! -d web/node_modules ]; then \
+		echo "→ 安装 web 依赖 (pnpm install)"; \
+		command -v pnpm >/dev/null 2>&1 || (echo "✗ 缺少 pnpm,请先 npm i -g pnpm 或 brew install pnpm" && exit 1); \
+		(cd web && pnpm install); \
+	fi
 	@echo "✓ setup 完成"
+
+.PHONY: web-install
+web-install:  ## 单独装 web 依赖
+	@cd web && pnpm install
 
 # === 依赖服务 ===
 .PHONY: dev-deps
@@ -79,7 +88,13 @@ dev: dev-deps dev-migrate  ## 一键启动 (依赖 + 迁移 + API + Worker + Web
 		(set -a; . ./.env; set +a; \
 			HELIOS_WORKSPACE_DIR=$(REPO_ROOT)/.helios/runs \
 			go -C worker run ./cmd/worker 2>&1 | sed "s/^/[$(YELLOW)worker$(RESET)] /") & \
-		(test -d web && (set -a; . ./.env; set +a; cd web && PORT=$(WEB_PORT) pnpm dev 2>&1 | sed "s/^/[$(GREEN)web$(RESET)]    /") || echo "[web] web/ 尚未初始化,跳过") & \
+		(if [ -d web ] && [ -d web/node_modules ]; then \
+			set -a; . ./.env; set +a; cd web && PORT=$(WEB_PORT) pnpm dev 2>&1 | sed "s/^/[$(GREEN)web$(RESET)]    /"; \
+		elif [ -d web ]; then \
+			echo "[web]    node_modules 缺失,跳过 (跑 make web-install 后再 make dev)"; \
+		else \
+			echo "[web]    web/ 尚未初始化,跳过"; \
+		fi) & \
 		wait
 
 .PHONY: dev-api
