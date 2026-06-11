@@ -17,7 +17,7 @@ func newPipelineRouter(t *testing.T) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	NewPipelineHandler().Register(r.Group("/api/v1"))
+	NewPipelineHandler(nil).Register(r.Group("/api/v1"))
 	return r
 }
 
