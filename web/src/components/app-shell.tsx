@@ -46,7 +46,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     title: "市场",
     items: [
-      { href: "/plugins", label: "插件", icon: "🧩", enabled: false },
+      { href: "/plugins", label: "插件", icon: "🧩", enabled: true },
       { href: "/templates", label: "模板", icon: "📋", enabled: false },
     ],
   },
