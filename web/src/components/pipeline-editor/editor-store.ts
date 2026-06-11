@@ -15,6 +15,7 @@ interface EditorState {
   selectedNodeId: string | null;
   validationErrors: ValidateError[];
   validationLoading: boolean;
+  nodeErrorMap: Record<string, ValidateError[]>;
 
   setNodes: (updater: Node[] | ((prev: Node[]) => Node[])) => void;
   setEdges: (updater: Edge[] | ((prev: Edge[]) => Edge[])) => void;
@@ -24,6 +25,7 @@ interface EditorState {
   updateNodeData: (id: string, patch: Record<string, unknown>) => void;
   setValidationErrors: (errors: ValidateError[]) => void;
   setValidationLoading: (loading: boolean) => void;
+  setNodeErrorMap: (map: Record<string, ValidateError[]>) => void;
   removeNode: (id: string) => void;
   duplicateNode: (id: string) => void;
 }
@@ -34,6 +36,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   selectedNodeId: null,
   validationErrors: [],
   validationLoading: false,
+  nodeErrorMap: {},
 
   setNodes: (updater) =>
     set((state) => ({
@@ -71,6 +74,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   setValidationErrors: (errors) => set({ validationErrors: errors }),
   setValidationLoading: (loading) => set({ validationLoading: loading }),
+  setNodeErrorMap: (map) => set({ nodeErrorMap: map }),
 
   removeNode: (id) => {
     set((state) => ({

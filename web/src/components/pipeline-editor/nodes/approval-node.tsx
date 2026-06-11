@@ -1,6 +1,7 @@
 "use client";
 
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
+import NodeErrorBadge from "./node-error-badge";
 
 export interface ApprovalNodeData {
   label: string;
@@ -10,7 +11,7 @@ export interface ApprovalNodeData {
 
 type ApprovalNode = Node<ApprovalNodeData, "approval">;
 
-export default function ApprovalNode({ selected, data }: NodeProps<ApprovalNode>) {
+export default function ApprovalNode({ id, selected, data }: NodeProps<ApprovalNode>) {
   return (
     <div
       style={{
@@ -27,8 +28,10 @@ export default function ApprovalNode({ selected, data }: NodeProps<ApprovalNode>
           : "0 2px 4px rgba(0,0,0,0.4)",
         minWidth: 180,
         transition: "border-color 0.15s, box-shadow 0.15s",
+        position: "relative",
       }}
     >
+      <NodeErrorBadge nodeId={id} />
       <Handle
         type="target"
         position={Position.Left}

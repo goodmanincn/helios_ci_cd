@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
+import NodeErrorBadge from "./node-error-badge";
 
 export interface StepNodeData {
   label: string;
@@ -12,7 +13,7 @@ export interface StepNodeData {
 
 type StepNode = Node<StepNodeData, "step">;
 
-export default function StepNode({ selected, data }: NodeProps<StepNode>) {
+export default function StepNode({ id, selected, data }: NodeProps<StepNode>) {
   const [hover, setHover] = useState(false);
   const icon = data.icon ?? "⚙";
 
@@ -37,6 +38,7 @@ export default function StepNode({ selected, data }: NodeProps<StepNode>) {
         transition: "border-color 0.15s, box-shadow 0.15s",
       }}
     >
+      <NodeErrorBadge nodeId={id} />
       <Handle
         type="target"
         position={Position.Left}

@@ -3,8 +3,27 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useEditorStore } from "./editor-store";
 import { yamlToGraph, graphToYaml } from "./yaml-graph";
-import { validateSpec } from "@/lib/pipelines-api";
+import { validateSpec, type ValidateError } from "@/lib/pipelines-api";
 import { useAuthStore } from "@/lib/auth-store";
+
+function mapErrorsToNodes(
+  errors: ValidateError[],
+  nodes: { id: string }[],
+): Record<string, ValidateError[]> {
+  const map: Record<string, ValidateError[]> = {};
+  for (const e of errors) {
+    if (!e.path) continue;
+    const m = e.path.match(/^stages\[(\d+)\]/);
+    if (m) {
+      const idx = parseInt(m[1], 10);
+      const node = nodes[idx];
+      if (node) {
+        (map[node.id] ??= []).push(e);
+      }
+    }
+  }
+  return map;
+}
 
 export default function YamlTab() {
   const nodes = useEditorStore((s) => s.nodes);
@@ -13,6 +32,7 @@ export default function YamlTab() {
   const setEdges = useEditorStore((s) => s.setEdges);
   const setValidationErrors = useEditorStore((s) => s.setValidationErrors);
   const setValidationLoading = useEditorStore((s) => s.setValidationLoading);
+  const setNodeErrorMap = useEditorStore((s) => s.setNodeErrorMap);
   const token = useAuthStore((s) => s.accessToken);
 
   const [yamlText, setYamlText] = useState("");
@@ -48,6 +68,7 @@ export default function YamlTab() {
         } else {
           setParseError("YAML 解析失败");
           setValidationErrors([]);
+          setNodeErrorMap({});
           return;
         }
 
@@ -56,15 +77,16 @@ export default function YamlTab() {
         try {
           const res = await validateSpec(token, text);
           setValidationErrors(res.errors ?? []);
+          setNodeErrorMap(mapErrorsToNodes(res.errors ?? [], result.nodes));
         } catch {
-          // 网络错误静默,不阻断编辑
           setValidationErrors([]);
+          setNodeErrorMap({});
         } finally {
           setValidationLoading(false);
         }
       }, 500);
     },
-    [setNodes, setEdges, setValidationErrors, setValidationLoading, token],
+    [setNodes, setEdges, setValidationErrors, setValidationLoading, setNodeErrorMap, token],
   );
 
   const validationErrors = useEditorStore((s) => s.validationErrors);

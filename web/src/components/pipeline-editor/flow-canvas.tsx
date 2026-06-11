@@ -125,9 +125,11 @@ function FlowCanvasInner() {
   const { screenToFlowPosition } = useReactFlow();
 
   useEffect(() => {
-    setNodes(initialNodes);
-    setEdges(initialEdges);
-  }, [setNodes, setEdges]);
+    if (nodes.length === 0) {
+      setNodes(initialNodes);
+      setEdges(initialEdges);
+    }
+  }, [setNodes, setEdges, nodes.length]);
 
   const onConnect = useCallback(
     (params: Connection) => setEdges((eds) => addEdge({ ...params, type: "custom", markerEnd: arrowMarker }, eds)),

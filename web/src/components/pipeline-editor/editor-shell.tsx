@@ -1,14 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import FlowCanvas from "./flow-canvas";
 import StepLibraryPanel from "./step-library-panel";
 import PropertyPanel from "./property-panel";
 import YamlTab from "./yaml-tab";
 import HistoryTab from "./history-tab";
 import { useEditorStore } from "./editor-store";
-import { graphToYaml } from "./yaml-graph";
-import { updatePipelineSpec } from "@/lib/pipelines-api";
+import { yamlToGraph, graphToYaml } from "./yaml-graph";
+import { updatePipelineSpec, getPipelineVersions } from "@/lib/pipelines-api";
 import { useAuthStore } from "@/lib/auth-store";
 
 type TabKey = "canvas" | "yaml" | "triggers" | "variables" | "history";
@@ -27,8 +27,39 @@ export default function EditorShell({ pipelineId }: { pipelineId: string }) {
   const hasErrors = validationErrors.length > 0;
   const nodes = useEditorStore((s) => s.nodes);
   const edges = useEditorStore((s) => s.edges);
+  const setNodes = useEditorStore((s) => s.setNodes);
+  const setEdges = useEditorStore((s) => s.setEdges);
   const token = useAuthStore((s) => s.accessToken);
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  // 加载真实 pipeline spec
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
+      try {
+        const versions = await getPipelineVersions(token, pipelineId);
+        if (cancelled) return;
+        if (versions.length > 0) {
+          const current = versions[0];
+          const result = yamlToGraph(current.spec_raw);
+          if (result) {
+            setNodes(result.nodes);
+            setEdges(result.edges);
+          }
+        }
+        setLoadError(null);
+      } catch {
+        if (!cancelled) setLoadError("加载 pipeline 失败");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [pipelineId, token, setNodes, setEdges]);
 
   async function handleSave() {
     if (hasErrors || nodes.length === 0) return;
@@ -76,7 +107,7 @@ export default function EditorShell({ pipelineId }: { pipelineId: string }) {
                 margin: 0,
               }}
             >
-              build-and-deploy
+              pipeline-{pipelineId}
             </h1>
             <span
               style={{
@@ -100,7 +131,7 @@ export default function EditorShell({ pipelineId }: { pipelineId: string }) {
                   display: "inline-block",
                 }}
               />
-              v3 · 已启用
+              编辑中
             </span>
           </div>
           <div
@@ -110,7 +141,7 @@ export default function EditorShell({ pipelineId }: { pipelineId: string }) {
               marginTop: 2,
             }}
           >
-            api-gateway · 最后保存 5分钟前 · alice
+            pipeline #{pipelineId}
           </div>
         </div>
 
@@ -185,6 +216,24 @@ export default function EditorShell({ pipelineId }: { pipelineId: string }) {
 
           <div style={{ position: "relative", overflow: "hidden", minWidth: 0 }}>
             <FlowCanvas />
+            {loading && (
+              <div style={{
+                position: "absolute", inset: 0,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                background: "rgba(10,10,15,0.7)", color: "var(--fg-mute)", fontSize: 14,
+              }}>
+                加载 pipeline…
+              </div>
+            )}
+            {loadError && (
+              <div style={{
+                position: "absolute", inset: 0,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                background: "rgba(10,10,15,0.7)", color: "var(--danger)", fontSize: 14,
+              }}>
+                {loadError}
+              </div>
+            )}
           </div>
 
           <aside
