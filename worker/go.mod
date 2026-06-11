@@ -19,6 +19,7 @@ require (
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
+	k8s.io/api v0.32.0 // indirect
 )
 
 replace github.com/helios-cicd/helios/api => ../api

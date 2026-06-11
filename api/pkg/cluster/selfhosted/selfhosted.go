@@ -7,6 +7,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/helios-cicd/helios/api/pkg/cluster"
@@ -14,8 +15,9 @@ import (
 
 // Provider 自建 K8s 集群提供者。
 type Provider struct {
-	config    cluster.ClusterConfig
-	clientset kubernetes.Interface
+	config     cluster.ClusterConfig
+	restConfig *rest.Config
+	clientset  kubernetes.Interface
 }
 
 // New 从 kubeconfig 字节创建 Provider。
@@ -35,6 +37,7 @@ func (p *Provider) Connect(ctx context.Context) error {
 	if err != nil {
 		return cluster.NewError(cluster.KindConnectError, "parse kubeconfig", err)
 	}
+	p.restConfig = restCfg
 	cs, err := kubernetes.NewForConfig(restCfg)
 	if err != nil {
 		return cluster.NewError(cluster.KindConnectError, "build clientset", err)
@@ -174,33 +177,6 @@ func (p *Provider) GetEvents(ctx context.Context, namespace string, limit int) (
 		})
 	}
 	return out, nil
-}
-
-// Deploy 用 server-side apply 部署 manifest。
-func (p *Provider) Deploy(ctx context.Context, spec cluster.DeploySpec) (*cluster.DeployResult, error) {
-	if err := p.Connect(ctx); err != nil {
-		return nil, err
-	}
-	// TODO: manifest 解析 + SSA apply (T4.3)
-	return nil, cluster.NewError(cluster.KindDeployError, "deploy not implemented", nil)
-}
-
-// Rollback 回滚 Deployment。
-func (p *Provider) Rollback(ctx context.Context, namespace, deployment string, toRevision int64) error {
-	if err := p.Connect(ctx); err != nil {
-		return err
-	}
-	// TODO: rollout undo (T4.5)
-	return cluster.NewError(cluster.KindDeployError, "rollback not implemented", nil)
-}
-
-// GetDeploymentHistory 返回 Deployment 的 revision 历史。
-func (p *Provider) GetDeploymentHistory(ctx context.Context, namespace, deployment string) ([]cluster.RevisionInfo, error) {
-	if err := p.Connect(ctx); err != nil {
-		return nil, err
-	}
-	// TODO: read ReplicaSet annotations (T4.5)
-	return nil, cluster.NewError(cluster.KindDeployError, "history not implemented", nil)
 }
 
 func workloadStatus(ready, desired int32) string {
