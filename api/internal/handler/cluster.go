@@ -14,7 +14,9 @@ import (
 	"github.com/helios-cicd/helios/api/internal/model"
 	"github.com/helios-cicd/helios/api/internal/repository"
 	"github.com/helios-cicd/helios/api/pkg/cluster"
+	"github.com/helios-cicd/helios/api/pkg/cluster/aliyun"
 	"github.com/helios-cicd/helios/api/pkg/cluster/selfhosted"
+	"github.com/helios-cicd/helios/api/pkg/cluster/tencent"
 )
 
 // ClusterHandler 集群管理 API。
@@ -266,21 +268,36 @@ func (h *ClusterHandler) resolveProvider(c *gin.Context) (cluster.Provider, bool
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "query failed"})
 		return nil, false
 	}
-	if cl.Provider != "selfhosted" {
-		c.JSON(http.StatusNotImplemented, gin.H{"error": "provider not supported yet"})
-		return nil, false
-	}
 	var cfgMap map[string]string
 	if err := json.Unmarshal(cl.Config, &cfgMap); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid cluster config"})
 		return nil, false
 	}
-	p, err := selfhosted.New(cluster.ClusterConfig{
-		Provider:   cl.Provider,
-		Kubeconfig: []byte(cfgMap["kubeconfig"]),
-	})
-	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+
+	var p cluster.Provider
+	var pErr error
+	switch cl.Provider {
+	case "selfhosted":
+		p, pErr = selfhosted.New(cluster.ClusterConfig{
+			Provider:   cl.Provider,
+			Kubeconfig: []byte(cfgMap["kubeconfig"]),
+		})
+	case "tke":
+		p, pErr = tencent.New(cluster.ClusterConfig{
+			Provider:   cl.Provider,
+			Kubeconfig: []byte(cfgMap["kubeconfig"]),
+		})
+	case "ack":
+		p, pErr = aliyun.New(cluster.ClusterConfig{
+			Provider:   cl.Provider,
+			Kubeconfig: []byte(cfgMap["kubeconfig"]),
+		})
+	default:
+		c.JSON(http.StatusNotImplemented, gin.H{"error": "provider not supported yet"})
+		return nil, false
+	}
+	if pErr != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": pErr.Error()})
 		return nil, false
 	}
 	return p, true
