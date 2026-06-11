@@ -62,10 +62,12 @@ interface AppShellProps {
   title: string;
   /** header 右侧自定义动作槽位 (例如 "+ 新建项目") */
   actions?: ReactNode;
+  /** shell-content 额外 className (e.g. 覆盖 overflow) */
+  contentClassName?: string;
   children: ReactNode;
 }
 
-export function AppShell({ title, actions, children }: AppShellProps) {
+export function AppShell({ title, actions, contentClassName, children }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
@@ -229,7 +231,7 @@ export function AppShell({ title, actions, children }: AppShellProps) {
           </div>
         </header>
 
-        <div className="shell-content">{children}</div>
+        <div className={`shell-content ${contentClassName || ""}`}>{children}</div>
       </main>
 
       {/* ===== ⌘K 命令面板占位 ===== */}
