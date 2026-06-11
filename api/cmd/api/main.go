@@ -27,6 +27,7 @@ import (
 	"github.com/helios-cicd/helios/api/internal/middleware"
 	"github.com/helios-cicd/helios/api/internal/repository"
 	"github.com/helios-cicd/helios/api/internal/service"
+	"github.com/helios-cicd/helios/api/pkg/builtintmpl"
 	heliosCrypto "github.com/helios-cicd/helios/api/pkg/crypto"
 	"github.com/helios-cicd/helios/api/pkg/git"
 	"github.com/helios-cicd/helios/api/pkg/health"
@@ -81,6 +82,13 @@ func main() {
 	gdb := mustOpenGorm(dsn)
 	rdb := mustOpenRedis()
 	issuer := mustNewIssuer()
+
+	// M8 T8.2.1: 写入内置流水线模板 (slug 冲突跳过, 不阻断启动)
+	if n, err := builtintmpl.Seed(gdb); err != nil {
+		log.Printf("warning: builtin template seed failed: %v", err)
+	} else if n > 0 {
+		log.Printf("seeded %d builtin pipeline templates", n)
+	}
 	userSvc := service.NewUserService(gdb)
 	projectSvc := service.NewProjectService(repository.NewProjectRepository(gdb))
 	store := authstore.New(rdb)
@@ -174,6 +182,7 @@ func main() {
 	handler.NewClusterHandler(gdb).Register(protected)
 	handler.NewHostHandler(gdb).Register(protected)
 	handler.NewHostGroupHandler(gdb).Register(protected)
+	handler.NewPipelineTemplateHandler(gdb).Register(protected)
 
 	addr := os.Getenv("HELIOS_API_ADDR")
 	if addr == "" {
