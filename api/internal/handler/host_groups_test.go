@@ -58,7 +58,7 @@ func newHGRouter(tx *gorm.DB, uid, orgID int64) *gin.Engine {
 	g := r.Group("/api/v1")
 	g.Use(fakeAuthWithOrg(uid, orgID))
 	NewHostGroupHandler(tx).Register(g)
-	NewHostHandler(tx).Register(g) // 走 ?group= 过滤路径需要
+	NewHostHandler(tx, nil).Register(g) // 走 ?group= 过滤路径需要
 	return r
 }
 

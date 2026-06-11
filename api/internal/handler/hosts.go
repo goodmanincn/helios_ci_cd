@@ -18,6 +18,8 @@ import (
 
 	"github.com/helios-cicd/helios/api/internal/model"
 	"github.com/helios-cicd/helios/api/internal/repository"
+	"github.com/helios-cicd/helios/api/pkg/crypto"
+	"github.com/helios-cicd/helios/api/pkg/sshrunner"
 )
 
 // HostHandler 主机管理 API。
@@ -25,13 +27,15 @@ type HostHandler struct {
 	db     *gorm.DB
 	store  repository.HostStore
 	groups repository.HostGroupStore
+	vault  *crypto.Vault
 }
 
-func NewHostHandler(db *gorm.DB) *HostHandler {
+func NewHostHandler(db *gorm.DB, vault *crypto.Vault) *HostHandler {
 	return &HostHandler{
 		db:     db,
 		store:  repository.NewHostRepository(db),
 		groups: repository.NewHostGroupRepository(db),
+		vault:  vault,
 	}
 }
 
@@ -43,6 +47,7 @@ func (h *HostHandler) Register(g *gin.RouterGroup) {
 	g.PUT("/hosts/:id", h.update)
 	g.DELETE("/hosts/:id", h.delete)
 	g.POST("/hosts/:id/test", h.test)
+	g.POST("/hosts/:id/dispatch-key", h.dispatchKey)
 }
 
 // ===== GET /hosts =====
@@ -317,6 +322,104 @@ func (h *HostHandler) test(c *gin.Context) {
 		"reachable": true,
 		"ssh_ok":    true,
 		"uname":     strings.TrimSpace(string(out)),
+	})
+}
+
+// ===== POST /hosts/:id/dispatch-key =====
+
+type dispatchKeyReq struct {
+	PublicKey string `json:"public_key" binding:"required"`
+}
+
+func (h *HostHandler) dispatchKey(c *gin.Context) {
+	if h.vault == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "vault not configured"})
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var req dispatchKeyReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	pub := strings.TrimSpace(req.PublicKey)
+	if pub == "" || !strings.HasPrefix(pub, "ssh-") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "public_key must be an ssh public key line"})
+		return
+	}
+
+	host, err := h.store.Get(id)
+	if err != nil {
+		if err == repository.ErrHostNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "host not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "query failed"})
+		return
+	}
+	if host.CredentialID == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "host has no credential_id (ssh-key secret)"})
+		return
+	}
+
+	sec, ok := loadSecretOrErr(c, h.db, *host.CredentialID)
+	if !ok {
+		return
+	}
+	if sec.Type != "ssh-key" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "credential must be type ssh-key"})
+		return
+	}
+	plain, err := h.vault.Decrypt(sec.EncryptedValue)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "decrypt credential failed"})
+		return
+	}
+
+	client, err := sshrunner.Dial(sshrunner.DialConfig{
+		Host: host.IP,
+		Port: host.SSHPort,
+		User: host.SSHUser,
+		Auth: sshrunner.AuthConfig{PrivateKey: string(plain)},
+	})
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": fmt.Sprintf("ssh connect failed: %v", err)})
+		return
+	}
+	defer client.Close()
+
+	session, err := client.Raw().NewSession()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "ssh session failed"})
+		return
+	}
+	defer session.Close()
+
+	// 追加公钥到 authorized_keys（幂等：grep 跳过已存在行）
+	script := fmt.Sprintf(
+		`set -e
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys
+grep -qxF '%s' ~/.ssh/authorized_keys || echo '%s' >> ~/.ssh/authorized_keys
+`,
+		strings.ReplaceAll(pub, "'", "'\\''"),
+		strings.ReplaceAll(pub, "'", "'\\''"),
+	)
+	if out, err := session.CombinedOutput(script); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   fmt.Sprintf("dispatch failed: %v", err),
+			"output":  strings.TrimSpace(string(out)),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"host_id": host.ID,
+		"message": "public key dispatched to ~/.ssh/authorized_keys",
 	})
 }
 

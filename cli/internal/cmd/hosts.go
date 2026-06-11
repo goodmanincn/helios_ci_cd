@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -14,7 +16,7 @@ func newHostsCmd() *cobra.Command {
 		Use:   "hosts",
 		Short: "物理机 / SSH 主机管理",
 	}
-	c.AddCommand(newHostsListCmd(), newHostsTestCmd())
+	c.AddCommand(newHostsListCmd(), newHostsTestCmd(), newHostsDispatchKeyCmd())
 	return c
 }
 
@@ -83,6 +85,36 @@ type hostItem struct {
 	IP      string `json:"ip"`
 	SSHUser string `json:"ssh_user"`
 	Status  string `json:"status"`
+}
+
+func newHostsDispatchKeyCmd() *cobra.Command {
+	var pubFile string
+	c := &cobra.Command{
+		Use:   "dispatch-key <host-id>",
+		Short: "将 SSH 公钥写入主机 authorized_keys",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cli, _, err := resolveClient()
+			if err != nil {
+				return err
+			}
+			if pubFile == "" {
+				return fmt.Errorf("--public-key-file required")
+			}
+			b, err := os.ReadFile(pubFile)
+			if err != nil {
+				return fmt.Errorf("read public key: %w", err)
+			}
+			body := map[string]string{"public_key": strings.TrimSpace(string(b))}
+			if err := cli.Do("POST", "/api/v1/hosts/"+args[0]+"/dispatch-key", body, nil); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "已分发公钥到 host %s\n", args[0])
+			return nil
+		},
+	}
+	c.Flags().StringVar(&pubFile, "public-key-file", "", "SSH 公钥文件路径 (.pub)")
+	return c
 }
 
 func writeHostsTable(w io.Writer, list []hostItem) error {

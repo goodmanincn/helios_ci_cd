@@ -187,7 +187,7 @@ func main() {
 	handler.NewSecretHandler(gdb, vault).Register(protected)
 	handler.NewApprovalHandler(approvalSvc).Register(protected)
 	handler.NewClusterHandler(gdb).Register(protected)
-	handler.NewHostHandler(gdb).Register(protected)
+	handler.NewHostHandler(gdb, vault).Register(protected)
 	handler.NewHostGroupHandler(gdb).Register(protected)
 	handler.NewPipelineTemplateHandler(gdb).Register(protected)
 	handler.NewPluginHandler(gdb).Register(protected)
