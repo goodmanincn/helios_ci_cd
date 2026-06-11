@@ -23,6 +23,8 @@ type Enqueuer interface {
 	EnqueueRunBuild(ctx context.Context, p *tasks.RunBuildPayload) (taskID string, err error)
 	// EnqueueApprovalTimeout 入延时任务 (asynq.ProcessIn). delay <=0 时立即执行 (兜底, 实际不该出现).
 	EnqueueApprovalTimeout(ctx context.Context, p *tasks.ApprovalTimeoutPayload, delay time.Duration) (taskID string, err error)
+	EnqueueRunOrchestrate(ctx context.Context, p *tasks.RunOrchestratePayload) (taskID string, err error)
+	EnqueueStageExecute(ctx context.Context, p *tasks.StageExecutePayload) (taskID string, err error)
 	Close() error
 }
 
@@ -133,6 +135,50 @@ func (e *AsynqEnqueuer) EnqueueApprovalTimeout(ctx context.Context, p *tasks.App
 		opts = append(opts, asynq.ProcessIn(delay))
 	}
 	t := asynq.NewTask(tasks.TypeApprovalTimeout, body, opts...)
+	info, err := e.client.EnqueueContext(ctx, t)
+	if err != nil {
+		return "", err
+	}
+	return info.ID, nil
+}
+
+// EnqueueRunOrchestrate 推进多 stage 流水线调度。retry=3, 超时=2 分钟 (纯调度, 不做重活)。
+func (e *AsynqEnqueuer) EnqueueRunOrchestrate(ctx context.Context, p *tasks.RunOrchestratePayload) (string, error) {
+	if err := p.Validate(); err != nil {
+		return "", fmt.Errorf("payload: %w", err)
+	}
+	body, err := p.Marshal()
+	if err != nil {
+		return "", err
+	}
+	t := asynq.NewTask(tasks.TypeRunOrchestrate, body,
+		asynq.Queue(tasks.QueueDefault),
+		asynq.MaxRetry(3),
+		asynq.Timeout(2*time.Minute),
+		asynq.Retention(24*time.Hour),
+	)
+	info, err := e.client.EnqueueContext(ctx, t)
+	if err != nil {
+		return "", err
+	}
+	return info.ID, nil
+}
+
+// EnqueueStageExecute 执行单个 stage。retry=2, 超时=30 分钟 (含容器执行)。
+func (e *AsynqEnqueuer) EnqueueStageExecute(ctx context.Context, p *tasks.StageExecutePayload) (string, error) {
+	if err := p.Validate(); err != nil {
+		return "", fmt.Errorf("payload: %w", err)
+	}
+	body, err := p.Marshal()
+	if err != nil {
+		return "", err
+	}
+	t := asynq.NewTask(tasks.TypeStageExecute, body,
+		asynq.Queue(tasks.QueueDefault),
+		asynq.MaxRetry(2),
+		asynq.Timeout(30*time.Minute),
+		asynq.Retention(24*time.Hour),
+	)
 	info, err := e.client.EnqueueContext(ctx, t)
 	if err != nil {
 		return "", err

@@ -19,7 +19,7 @@ import (
 func TestApprovalTimeoutHandler_OK(t *testing.T) {
 	// 由于 ApprovalTimeoutHandler 接受 *approval.Timeouter (具体类型, 非接口),
 	// 这里只测 payload 错路径; 真实路径由 pkg/approval/timeout_test.go 覆盖.
-	h := NewApprovalTimeout(nil)
+	h := NewApprovalTimeout(nil, nil, nil)
 	body, _ := json.Marshal(&tasks.ApprovalTimeoutPayload{RequestID: 42})
 	task := asynq.NewTask(tasks.TypeApprovalTimeout, body)
 	err := h.ProcessTask(context.Background(), task)
@@ -27,7 +27,7 @@ func TestApprovalTimeoutHandler_OK(t *testing.T) {
 }
 
 func TestApprovalTimeoutHandler_BadPayload(t *testing.T) {
-	h := NewApprovalTimeout(nil)
+	h := NewApprovalTimeout(nil, nil, nil)
 	task := asynq.NewTask(tasks.TypeApprovalTimeout, []byte("not json"))
 	err := h.ProcessTask(context.Background(), task)
 	require.Error(t, err)

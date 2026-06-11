@@ -9,6 +9,7 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log"
@@ -16,17 +17,21 @@ import (
 	"github.com/hibiken/asynq"
 
 	"github.com/helios-cicd/helios/api/pkg/approval"
+	"github.com/helios-cicd/helios/api/pkg/runengine"
+	"github.com/helios-cicd/helios/api/pkg/runstate"
 	"github.com/helios-cicd/helios/api/pkg/tasks"
 )
 
 // ApprovalTimeoutHandler 是 asynq.Handler 实现.
 type ApprovalTimeoutHandler struct {
-	t *approval.Timeouter
+	t   *approval.Timeouter
+	db  *sql.DB
+	enq runengine.OrchestrateEnqueuer
 }
 
 // NewApprovalTimeout 构造.
-func NewApprovalTimeout(t *approval.Timeouter) *ApprovalTimeoutHandler {
-	return &ApprovalTimeoutHandler{t: t}
+func NewApprovalTimeout(t *approval.Timeouter, db *sql.DB, enq runengine.OrchestrateEnqueuer) *ApprovalTimeoutHandler {
+	return &ApprovalTimeoutHandler{t: t, db: db, enq: enq}
 }
 
 // ProcessTask asynq.Handler 接口.
@@ -52,5 +57,10 @@ func (h *ApprovalTimeoutHandler) ProcessTask(ctx context.Context, t *asynq.Task)
 	}
 	log.Printf("[approval-timeout] request=%d run=%d on_timeout=%s → request.status=%s run.status=%s",
 		res.RequestID, res.RunID, res.OnTimeout, res.NewStatus, res.RunStatus)
+	if res.RunStatus == runstate.StatusRunning && h.db != nil && h.enq != nil {
+		if err := runengine.ResumeOrchestrate(ctx, h.db, h.enq, res.RunID); err != nil {
+			log.Printf("[approval-timeout] resume orchestrate run=%d err=%v", res.RunID, err)
+		}
+	}
 	return nil
 }

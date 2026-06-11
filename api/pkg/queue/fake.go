@@ -21,6 +21,8 @@ type FakeEnqueuer struct {
 	Webhooks         []*tasks.WebhookRegisterPayload
 	RunBuilds        []*tasks.RunBuildPayload
 	ApprovalTimeouts []ApprovalTimeoutCall
+	RunOrchestrates  []*tasks.RunOrchestratePayload
+	StageExecutes    []*tasks.StageExecutePayload
 	// NextID 注入下一个任务返回的 ID,空则按序号自增。
 	NextID string
 	// Err 注入下一次调用的错误。
@@ -92,6 +94,40 @@ func (f *FakeEnqueuer) EnqueueApprovalTimeout(_ context.Context, p *tasks.Approv
 	}
 	cp := *p
 	f.ApprovalTimeouts = append(f.ApprovalTimeouts, ApprovalTimeoutCall{Payload: &cp, Delay: delay})
+	if f.NextID != "" {
+		return f.NextID, nil
+	}
+	return "fake-task-id", nil
+}
+
+func (f *FakeEnqueuer) EnqueueRunOrchestrate(_ context.Context, p *tasks.RunOrchestratePayload) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return "", f.Err
+	}
+	if err := p.Validate(); err != nil {
+		return "", err
+	}
+	cp := *p
+	f.RunOrchestrates = append(f.RunOrchestrates, &cp)
+	if f.NextID != "" {
+		return f.NextID, nil
+	}
+	return "fake-task-id", nil
+}
+
+func (f *FakeEnqueuer) EnqueueStageExecute(_ context.Context, p *tasks.StageExecutePayload) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return "", f.Err
+	}
+	if err := p.Validate(); err != nil {
+		return "", err
+	}
+	cp := *p
+	f.StageExecutes = append(f.StageExecutes, &cp)
 	if f.NextID != "" {
 		return f.NextID, nil
 	}

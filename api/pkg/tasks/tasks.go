@@ -35,6 +35,16 @@ const (
 	// Handler: worker/internal/handler/approval_timeout.go,按 on_timeout 三策略 reject/approve/pause。
 	// 幂等: handler 第一行 SELECT FOR UPDATE, 非 pending 直接 no-op (Approve/Reject 抢先时)。
 	TypeApprovalTimeout = "helios:approval:timeout"
+
+	// TypeRunOrchestrate 多 stage 流水线调度 tick (T2.2.4)。
+	// 触发: checkout 成功后 (pipeline 有 stages) / stage 完成 / 审批通过后。
+	// Handler: worker/internal/handler/orchestrate.go — bootstrap + NextReady + 派发 stage 任务。
+	TypeRunOrchestrate = "helios:run:orchestrate"
+
+	// TypeStageExecute 执行单个 stage (T2.2.4)。
+	// 触发: orchestrate 从 Scheduler.NextReady 派发。
+	// Handler: worker/internal/handler/stage_execute.go — 跑 steps / builtin, 完成后 re-enqueue orchestrate。
+	TypeStageExecute = "helios:stage:execute"
 )
 
 // GitCheckoutPayload helios:git:checkout 的 payload。
@@ -175,6 +185,72 @@ func UnmarshalApprovalTimeout(data []byte) (*ApprovalTimeoutPayload, error) {
 	}
 	if err := p.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid approval_timeout payload: %w", err)
+	}
+	return &p, nil
+}
+
+// RunOrchestratePayload helios:run:orchestrate 的 payload。
+type RunOrchestratePayload struct {
+	RunID     int64 `json:"run_id"`
+	ProjectID int64 `json:"project_id"`
+}
+
+func (p *RunOrchestratePayload) Validate() error {
+	if p.RunID <= 0 {
+		return fmt.Errorf("run_id required")
+	}
+	if p.ProjectID <= 0 {
+		return fmt.Errorf("project_id required")
+	}
+	return nil
+}
+
+func (p *RunOrchestratePayload) Marshal() ([]byte, error) { return json.Marshal(p) }
+
+func UnmarshalRunOrchestrate(data []byte) (*RunOrchestratePayload, error) {
+	var p RunOrchestratePayload
+	if err := json.Unmarshal(data, &p); err != nil {
+		return nil, fmt.Errorf("unmarshal run_orchestrate: %w", err)
+	}
+	if err := p.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid run_orchestrate payload: %w", err)
+	}
+	return &p, nil
+}
+
+// StageExecutePayload helios:stage:execute 的 payload。
+type StageExecutePayload struct {
+	RunID         int64  `json:"run_id"`
+	ProjectID     int64  `json:"project_id"`
+	StageRecordID int64  `json:"stage_record_id"` // stages.id
+	StageID       string `json:"stage_id"`        // DSL stage id (含 matrix 后缀)
+}
+
+func (p *StageExecutePayload) Validate() error {
+	if p.RunID <= 0 {
+		return fmt.Errorf("run_id required")
+	}
+	if p.ProjectID <= 0 {
+		return fmt.Errorf("project_id required")
+	}
+	if p.StageRecordID <= 0 {
+		return fmt.Errorf("stage_record_id required")
+	}
+	if p.StageID == "" {
+		return fmt.Errorf("stage_id required")
+	}
+	return nil
+}
+
+func (p *StageExecutePayload) Marshal() ([]byte, error) { return json.Marshal(p) }
+
+func UnmarshalStageExecute(data []byte) (*StageExecutePayload, error) {
+	var p StageExecutePayload
+	if err := json.Unmarshal(data, &p); err != nil {
+		return nil, fmt.Errorf("unmarshal stage_execute: %w", err)
+	}
+	if err := p.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid stage_execute payload: %w", err)
 	}
 	return &p, nil
 }

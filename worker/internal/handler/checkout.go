@@ -3,6 +3,7 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/hibiken/asynq"
 
+	"github.com/helios-cicd/helios/api/pkg/runengine"
 	"github.com/helios-cicd/helios/api/pkg/runrepo"
 	"github.com/helios-cicd/helios/api/pkg/tasks"
 	"github.com/helios-cicd/helios/worker/internal/gitrunner"
@@ -29,22 +31,17 @@ type CheckoutHandler struct {
 	repo         *runrepo.Repo
 	cloner       gitrunner.Cloner
 	workspaceDir string // 例如 /tmp/helios/runs
-	enq          BuildEnqueuer
-}
-
-// BuildEnqueuer 仅声明 checkout 完毕后需要调用的 enqueue 方法,
-// 避免依赖整个 queue 包 (减小测试 mock 面)。
-type BuildEnqueuer interface {
-	EnqueueRunBuild(ctx context.Context, p *tasks.RunBuildPayload) (string, error)
+	db           *sql.DB
+	enq          runengine.AfterCheckoutEnqueuer
 }
 
 // NewCheckout 构造。workspaceDir 必填,各 run 在其下创建子目录。
-// enq 用于 checkout 成功后投递 build 任务;传 nil 兼容老调用 (此时不入队 build)。
-func NewCheckout(repo *runrepo.Repo, cloner gitrunner.Cloner, workspaceDir string, enq BuildEnqueuer) *CheckoutHandler {
+// db+enq 用于 checkout 成功后路由到 orchestrate 或 legacy build; 传 nil 则不入队。
+func NewCheckout(repo *runrepo.Repo, cloner gitrunner.Cloner, workspaceDir string, db *sql.DB, enq runengine.AfterCheckoutEnqueuer) *CheckoutHandler {
 	if workspaceDir == "" {
 		workspaceDir = "/tmp/helios/runs"
 	}
-	return &CheckoutHandler{repo: repo, cloner: cloner, workspaceDir: workspaceDir, enq: enq}
+	return &CheckoutHandler{repo: repo, cloner: cloner, workspaceDir: workspaceDir, db: db, enq: enq}
 }
 
 // ProcessTask 实现 asynq.Handler 接口。
@@ -94,18 +91,14 @@ func (h *CheckoutHandler) ProcessTask(ctx context.Context, t *asynq.Task) error 
 
 	log.Printf("checkout: run_id=%d cloned to %s", p.RunID, wsDir)
 
-	// 成功后入队 build 任务 (T1.3.2)。入队失败不视为 checkout 失败,
-	// 但会写日志 + 把 run 标记 failed 让用户知道, 避免无限挂在 running。
-	if h.enq != nil {
-		_, eqErr := h.enq.EnqueueRunBuild(ctx, &tasks.RunBuildPayload{
-			RunID: p.RunID, ProjectID: p.ProjectID,
-		})
-		if eqErr != nil {
-			log.Printf("checkout: run_id=%d enqueue build failed: %v", p.RunID, eqErr)
-			_ = h.repo.MarkFailed(ctx, p.RunID, "enqueue build: "+eqErr.Error())
-			return fmt.Errorf("enqueue build: %w: %w", eqErr, asynq.SkipRetry)
+	// 成功后路由到多 stage orchestrate 或 legacy build (T2.2.4)。
+	if h.enq != nil && h.db != nil {
+		if eqErr := runengine.DispatchAfterCheckout(ctx, h.db, h.enq, p.RunID, p.ProjectID); eqErr != nil {
+			log.Printf("checkout: run_id=%d dispatch after checkout failed: %v", p.RunID, eqErr)
+			_ = h.repo.MarkFailed(ctx, p.RunID, "dispatch run: "+eqErr.Error())
+			return fmt.Errorf("dispatch run: %w: %w", eqErr, asynq.SkipRetry)
 		}
-		log.Printf("checkout: run_id=%d build task enqueued", p.RunID)
+		log.Printf("checkout: run_id=%d downstream task enqueued", p.RunID)
 	}
 	return nil
 }

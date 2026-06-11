@@ -112,7 +112,7 @@ func TestCheckout_HappyPath(t *testing.T) {
 	tmp := t.TempDir()
 	repo := runrepo.New(db)
 	cloner := &fakeCloner{create: true}
-	h := NewCheckout(repo, cloner, tmp, nil)
+	h := NewCheckout(repo, cloner, tmp, nil, nil)
 
 	p := &tasks.GitCheckoutPayload{
 		RunID: runID, ProjectID: 1,
@@ -154,7 +154,7 @@ func TestCheckout_RunNotFound(t *testing.T) {
 	db := requireDB(t)
 	defer func() { _ = db.Close() }()
 
-	h := NewCheckout(runrepo.New(db), &fakeCloner{}, t.TempDir(), nil)
+	h := NewCheckout(runrepo.New(db), &fakeCloner{}, t.TempDir(), nil, nil)
 	p := &tasks.GitCheckoutPayload{RunID: 99999999, ProjectID: 1, RepoURL: "x", Branch: "main"}
 	body, _ := p.Marshal()
 	err := h.ProcessTask(context.Background(), asynq.NewTask(tasks.TypeGitCheckout, body))
@@ -165,7 +165,7 @@ func TestCheckout_RunNotFound(t *testing.T) {
 
 // payload 损坏 → SkipRetry
 func TestCheckout_BadPayload(t *testing.T) {
-	h := NewCheckout(nil, &fakeCloner{}, t.TempDir(), nil)
+	h := NewCheckout(nil, &fakeCloner{}, t.TempDir(), nil, nil)
 	task := asynq.NewTask(tasks.TypeGitCheckout, []byte("not json"))
 	err := h.ProcessTask(context.Background(), task)
 	if err == nil || !errors.Is(err, asynq.SkipRetry) {
@@ -187,7 +187,7 @@ func TestCheckout_AlreadyTerminal(t *testing.T) {
 	}
 
 	cloner := &fakeCloner{}
-	h := NewCheckout(runrepo.New(db), cloner, t.TempDir(), nil)
+	h := NewCheckout(runrepo.New(db), cloner, t.TempDir(), nil, nil)
 	p := &tasks.GitCheckoutPayload{RunID: runID, ProjectID: 1, RepoURL: "x", Branch: "main"}
 	body, _ := p.Marshal()
 	if err := h.ProcessTask(context.Background(), asynq.NewTask(tasks.TypeGitCheckout, body)); err != nil {
@@ -207,7 +207,7 @@ func TestCheckout_CloneFails(t *testing.T) {
 	defer cleanup()
 
 	cloner := &fakeCloner{err: errors.New("network down")}
-	h := NewCheckout(runrepo.New(db), cloner, t.TempDir(), nil)
+	h := NewCheckout(runrepo.New(db), cloner, t.TempDir(), nil, nil)
 	p := &tasks.GitCheckoutPayload{RunID: runID, ProjectID: 1, RepoURL: "x", Branch: "main"}
 	body, _ := p.Marshal()
 	err := h.ProcessTask(context.Background(), asynq.NewTask(tasks.TypeGitCheckout, body))
@@ -231,7 +231,7 @@ func TestCheckout_OnRetryExhausted(t *testing.T) {
 	// 先 mark running 模拟实际场景
 	_, _ = runrepo.New(db).MarkRunning(context.Background(), runID)
 
-	h := NewCheckout(runrepo.New(db), &fakeCloner{}, t.TempDir(), nil)
+	h := NewCheckout(runrepo.New(db), &fakeCloner{}, t.TempDir(), nil, nil)
 	p := &tasks.GitCheckoutPayload{RunID: runID, ProjectID: 1, RepoURL: "x", Branch: "main"}
 	body, _ := p.Marshal()
 	h.OnRetryExhausted(context.Background(), asynq.NewTask(tasks.TypeGitCheckout, body), errors.New("simulated"))

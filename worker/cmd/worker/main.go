@@ -20,6 +20,7 @@ import (
 	"github.com/helios-cicd/helios/api/pkg/logstream"
 	"github.com/helios-cicd/helios/api/pkg/projectrepo"
 	"github.com/helios-cicd/helios/api/pkg/queue"
+	"github.com/helios-cicd/helios/api/pkg/runengine"
 	"github.com/helios-cicd/helios/api/pkg/runrepo"
 	"github.com/helios-cicd/helios/api/pkg/runstate"
 	"github.com/helios-cicd/helios/api/pkg/tasks"
@@ -58,7 +59,7 @@ func main() {
 	repo := runrepo.New(db)
 	enq := queue.New(redisAddr)
 	defer func() { _ = enq.Close() }()
-	checkoutH := handler.NewCheckout(repo, gitrunner.NewShell(), workspaceDir, enq)
+	checkoutH := handler.NewCheckout(repo, gitrunner.NewShell(), workspaceDir, db, enq)
 
 	machine := runstate.New(db)
 	buildTimeout := 5 * time.Minute
@@ -115,6 +116,13 @@ func main() {
 	}
 
 	buildH := handler.NewBuild(projRepo, machine, workspaceDir, buildTimeout, buildOpts...)
+
+	artifactRoot := envOr("HELIOS_ARTIFACT_DIR", "/tmp/helios/artifacts")
+	if err := os.MkdirAll(artifactRoot, 0o755); err != nil {
+		log.Fatalf("mkdir artifact root %s: %v", artifactRoot, err)
+	}
+	orchestrateH := handler.NewOrchestrate(db, machine, workspaceDir, enq, archiveSvc)
+	stageExecH := handler.NewStageExecute(db, machine, workspaceDir, artifactRoot, buildTimeout, enq, logsWriter)
 	ghProvider := git.NewGitHubProvider(git.GitHubConfig{
 		Token: os.Getenv("HELIOS_GITHUB_TOKEN"),
 	})
@@ -126,7 +134,7 @@ func main() {
 	)
 
 	// T2.6.3: 审批超时 handler (asynq critical 队列).
-	approvalTimeoutH := handler.NewApprovalTimeout(approval.NewTimeouter(db, machine))
+	approvalTimeoutH := handler.NewApprovalTimeout(approval.NewTimeouter(db, machine), db, enq)
 
 	// T4.1.4: 集群健康检查定时任务.
 	clusterhealth.Start(db)
@@ -171,6 +179,19 @@ func main() {
 
 	// 审批超时 handler (T2.6.3): MaxRetry=0, 不接 exhaust hook (handler 自身幂等).
 	mux.Handle(tasks.TypeApprovalTimeout, approvalTimeoutH)
+
+	// 多 stage 调度 (T2.2.4).
+	mux.Handle(tasks.TypeRunOrchestrate, withExhaustHook(orchestrateH, func(ctx context.Context, t *asynq.Task, err error) {
+		if p, perr := tasks.UnmarshalRunOrchestrate(t.Payload()); perr == nil {
+			_ = machine.MarkFailed(ctx, p.RunID, "orchestrate retry exhausted: "+err.Error(), runstate.TransitionOpts{ProjectID: &p.ProjectID})
+		}
+	}))
+	mux.Handle(tasks.TypeStageExecute, withExhaustHook(stageExecH, func(ctx context.Context, t *asynq.Task, err error) {
+		if p, perr := tasks.UnmarshalStageExecute(t.Payload()); perr == nil {
+			advOpts := runengine.AdvanceOpts{DB: db, Machine: machine, WorkspaceDir: workspaceDir, StageEnq: enq, TimeoutEnq: enq}
+			_ = runengine.OnStageComplete(ctx, advOpts, p.RunID, p.ProjectID, p.StageID, false, 1)
+		}
+	}))
 
 	// === 启动 + signal ===
 	go func() {

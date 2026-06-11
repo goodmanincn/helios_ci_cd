@@ -299,6 +299,46 @@ func (s *Scheduler) Outcome() NodeStatus {
 	}
 }
 
+// RestoreFromDB 根据 DB 已落库的阶段状态重建调度器内部态 (T2.2.4 IO 层)。
+//
+// statuses: stage_id → DB status (pending/running/success/failed/skipped/canceled/approval)。
+// running/approval 节点视为已派发 (dispatched), NextReady 不会重复返回。
+func (s *Scheduler) RestoreFromDB(statuses map[NodeID]string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for id := range s.status {
+		dbSt, ok := statuses[id]
+		if !ok {
+			continue
+		}
+		switch dbSt {
+		case "success":
+			s.status[id] = StatusSuccess
+			delete(s.dispatched, id)
+		case "failed":
+			s.status[id] = StatusFailed
+			delete(s.dispatched, id)
+		case "skipped":
+			s.status[id] = StatusSkipped
+			delete(s.dispatched, id)
+		case "canceled":
+			s.status[id] = StatusCanceled
+			delete(s.dispatched, id)
+		case "running":
+			s.status[id] = StatusRunning
+			s.dispatched[id] = true
+		case "approval":
+			s.status[id] = StatusWaitingApproval
+			s.dispatched[id] = true
+		default:
+			// pending / queued / 未知 → 保持 pending
+			s.status[id] = StatusPending
+			delete(s.dispatched, id)
+		}
+	}
+}
+
 // String 调试用快照字符串 (按 id 排序)。
 func (s *Scheduler) String() string {
 	snap := s.Snapshot()

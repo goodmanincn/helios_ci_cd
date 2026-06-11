@@ -31,6 +31,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/helios-cicd/helios/api/internal/model"
+	"github.com/helios-cicd/helios/api/pkg/runengine"
 	"github.com/helios-cicd/helios/api/pkg/runstate"
 	"github.com/helios-cicd/helios/api/pkg/tasks"
 )
@@ -89,12 +90,18 @@ type TimeoutEnqueuer interface {
 	EnqueueApprovalTimeout(ctx context.Context, p *tasks.ApprovalTimeoutPayload, delay time.Duration) (taskID string, err error)
 }
 
+// OrchestrateEnqueuer 审批通过后恢复多 stage 调度。
+type OrchestrateEnqueuer interface {
+	EnqueueRunOrchestrate(ctx context.Context, p *tasks.RunOrchestratePayload) (taskID string, err error)
+}
+
 // ApprovalService 审批业务层. db 必填, machine 可空 (空则 Approve/Reject 跳过 run 推进只落投票).
 // timeoutEnq 可空 (空则不发延时任务, 即审批永不超时, 用于单元测试).
 type ApprovalService struct {
-	db         *gorm.DB
-	machine    *runstate.Machine
-	timeoutEnq TimeoutEnqueuer
+	db             *gorm.DB
+	machine        *runstate.Machine
+	timeoutEnq     TimeoutEnqueuer
+	orchestrateEnq OrchestrateEnqueuer
 }
 
 // NewApprovalService 构造.
@@ -105,6 +112,12 @@ func NewApprovalService(db *gorm.DB, m *runstate.Machine) *ApprovalService {
 // WithTimeoutEnqueuer 链式注入延时任务 enqueuer, 启用超时分支.
 func (s *ApprovalService) WithTimeoutEnqueuer(enq TimeoutEnqueuer) *ApprovalService {
 	s.timeoutEnq = enq
+	return s
+}
+
+// WithOrchestrateEnqueuer 审批通过后入队 run orchestrate (T2.2.4).
+func (s *ApprovalService) WithOrchestrateEnqueuer(enq OrchestrateEnqueuer) *ApprovalService {
+	s.orchestrateEnq = enq
 	return s
 }
 
@@ -315,6 +328,13 @@ func (s *ApprovalService) vote(ctx context.Context, in VoteInput, decision strin
 		}
 		if mErr != nil {
 			log.Printf("[approval] machine transition run=%d → %s err=%v", in.RunID, nextRun, mErr)
+		} else if nextRun == runstate.StatusRunning && s.orchestrateEnq != nil && s.db != nil {
+			sqlDB, dbErr := s.db.DB()
+			if dbErr == nil {
+				if rErr := runengine.ResumeOrchestrate(ctx, sqlDB, s.orchestrateEnq, in.RunID); rErr != nil {
+					log.Printf("[approval] resume orchestrate run=%d err=%v", in.RunID, rErr)
+				}
+			}
 		}
 	}
 
