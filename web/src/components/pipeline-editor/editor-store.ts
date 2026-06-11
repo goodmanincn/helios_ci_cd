@@ -7,11 +7,14 @@ import {
   type NodeChange,
   type EdgeChange,
 } from "@xyflow/react";
+import { type ValidateError } from "@/lib/pipelines-api";
 
 interface EditorState {
   nodes: Node[];
   edges: Edge[];
   selectedNodeId: string | null;
+  validationErrors: ValidateError[];
+  validationLoading: boolean;
 
   setNodes: (updater: Node[] | ((prev: Node[]) => Node[])) => void;
   setEdges: (updater: Edge[] | ((prev: Edge[]) => Edge[])) => void;
@@ -19,12 +22,16 @@ interface EditorState {
   onEdgesChange: (changes: EdgeChange[]) => void;
   setSelectedNodeId: (id: string | null) => void;
   updateNodeData: (id: string, patch: Record<string, unknown>) => void;
+  setValidationErrors: (errors: ValidateError[]) => void;
+  setValidationLoading: (loading: boolean) => void;
 }
 
 export const useEditorStore = create<EditorState>((set, get) => ({
   nodes: [],
   edges: [],
   selectedNodeId: null,
+  validationErrors: [],
+  validationLoading: false,
 
   setNodes: (updater) =>
     set((state) => ({
@@ -39,7 +46,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   onNodesChange: (changes) => {
     const next = applyNodeChanges(changes, get().nodes);
     set({ nodes: next });
-    // selection change 同步到 selectedNodeId
     const selectChange = changes.find((c) => c.type === "select");
     if (selectChange) {
       set({ selectedNodeId: selectChange.selected ? selectChange.id : null });
@@ -60,4 +66,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       ),
     }));
   },
+
+  setValidationErrors: (errors) => set({ validationErrors: errors }),
+  setValidationLoading: (loading) => set({ validationLoading: loading }),
 }));

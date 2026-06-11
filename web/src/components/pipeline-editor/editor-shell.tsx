@@ -5,6 +5,7 @@ import FlowCanvas from "./flow-canvas";
 import StepLibraryPanel from "./step-library-panel";
 import PropertyPanel from "./property-panel";
 import YamlTab from "./yaml-tab";
+import { useEditorStore } from "./editor-store";
 
 type TabKey = "canvas" | "yaml" | "triggers" | "variables" | "history";
 
@@ -18,6 +19,8 @@ const TABS: { key: TabKey; label: string }[] = [
 
 export default function EditorShell({ pipelineId }: { pipelineId: string }) {
   const [tab, setTab] = useState<TabKey>("canvas");
+  const validationErrors = useEditorStore((s) => s.validationErrors);
+  const hasErrors = validationErrors.length > 0;
 
   return (
     <div
@@ -122,7 +125,13 @@ export default function EditorShell({ pipelineId }: { pipelineId: string }) {
         </div>
 
         <button className="btn bsm">▶ 试运行</button>
-        <button className="btn bsm btn-primary">保存并启用</button>
+        <button
+          className="btn bsm btn-primary"
+          disabled={hasErrors}
+          title={hasErrors ? "请先修复 YAML 错误" : undefined}
+        >
+          保存并启用
+        </button>
       </div>
 
       {/* 主内容区 */}
