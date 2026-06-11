@@ -5,7 +5,11 @@ import FlowCanvas from "./flow-canvas";
 import StepLibraryPanel from "./step-library-panel";
 import PropertyPanel from "./property-panel";
 import YamlTab from "./yaml-tab";
+import HistoryTab from "./history-tab";
 import { useEditorStore } from "./editor-store";
+import { graphToYaml } from "./yaml-graph";
+import { updatePipelineSpec } from "@/lib/pipelines-api";
+import { useAuthStore } from "@/lib/auth-store";
 
 type TabKey = "canvas" | "yaml" | "triggers" | "variables" | "history";
 
@@ -21,6 +25,26 @@ export default function EditorShell({ pipelineId }: { pipelineId: string }) {
   const [tab, setTab] = useState<TabKey>("canvas");
   const validationErrors = useEditorStore((s) => s.validationErrors);
   const hasErrors = validationErrors.length > 0;
+  const nodes = useEditorStore((s) => s.nodes);
+  const edges = useEditorStore((s) => s.edges);
+  const token = useAuthStore((s) => s.accessToken);
+  const [saving, setSaving] = useState(false);
+
+  async function handleSave() {
+    if (hasErrors || nodes.length === 0) return;
+    const message = window.prompt("保存备注 (可选):", "") ?? "";
+    const specRaw = graphToYaml(nodes, edges);
+    setSaving(true);
+    try {
+      await updatePipelineSpec(token, pipelineId, { spec_raw: specRaw, message });
+      alert("保存成功");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "保存失败";
+      alert(msg);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div
@@ -127,10 +151,11 @@ export default function EditorShell({ pipelineId }: { pipelineId: string }) {
         <button className="btn bsm">▶ 试运行</button>
         <button
           className="btn bsm btn-primary"
-          disabled={hasErrors}
+          disabled={hasErrors || saving || nodes.length === 0}
           title={hasErrors ? "请先修复 YAML 错误" : undefined}
+          onClick={handleSave}
         >
-          保存并启用
+          {saving ? "保存中…" : "保存并启用"}
         </button>
       </div>
 
@@ -145,7 +170,6 @@ export default function EditorShell({ pipelineId }: { pipelineId: string }) {
             overflow: "hidden",
           }}
         >
-          {/* 左侧步骤库 */}
           <aside
             style={{
               borderRight: "1px solid var(--border)",
@@ -159,12 +183,10 @@ export default function EditorShell({ pipelineId }: { pipelineId: string }) {
             <StepLibraryPanel />
           </aside>
 
-          {/* 中间画布 */}
           <div style={{ position: "relative", overflow: "hidden", minWidth: 0 }}>
             <FlowCanvas />
           </div>
 
-          {/* 右侧属性面板 */}
           <aside
             style={{
               borderLeft: "1px solid var(--border)",
@@ -179,8 +201,9 @@ export default function EditorShell({ pipelineId }: { pipelineId: string }) {
       )}
 
       {tab === "yaml" && <YamlTab />}
+      {tab === "history" && <HistoryTab pipelineId={pipelineId} />}
 
-      {tab !== "canvas" && tab !== "yaml" && (
+      {tab !== "canvas" && tab !== "yaml" && tab !== "history" && (
         <div
           style={{
             flex: 1,
