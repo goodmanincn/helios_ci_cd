@@ -104,7 +104,7 @@ func ExecuteStage(ctx context.Context, opts ExecuteOpts, runID, projectID, stage
 		}
 		_ = UpdateStepStatus(ctx, opts.DB, stepRowID, "running", nil)
 
-		ec, stepOut, runErr := runStep(ctx, opts, run, stageID, wsDir, storage, &step)
+		ec, stepOut, runErr := runStep(ctx, opts, run, stageID, wsDir, storage, &step, dslStage.Secrets)
 		if runErr != nil {
 			_ = UpdateStepStatus(ctx, opts.DB, stepRowID, "failed", &ec)
 			return false, ec, runErr
@@ -124,7 +124,7 @@ func ExecuteStage(ctx context.Context, opts ExecuteOpts, runID, projectID, stage
 	return true, 0, nil
 }
 
-func runStep(ctx context.Context, opts ExecuteOpts, run *RunInfo, stageID, wsDir string, storage artifact.Storage, step *dsl.Step) (exitCode int, outputs map[string]any, err error) {
+func runStep(ctx context.Context, opts ExecuteOpts, run *RunInfo, stageID, wsDir string, storage artifact.Storage, step *dsl.Step, stageSecrets []string) (exitCode int, outputs map[string]any, err error) {
 	runCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
 	defer cancel()
 
@@ -153,7 +153,7 @@ func runStep(ctx context.Context, opts ExecuteOpts, run *RunInfo, stageID, wsDir
 		if opts.PluginResolver == nil {
 			return 1, nil, fmt.Errorf("unknown uses %q (no builtin, no plugin resolver wired)", step.Uses)
 		}
-		return runPlugin(runCtx, opts, run, stageID, wsDir, step)
+		return runPlugin(runCtx, opts, run, stageID, wsDir, step, stageSecrets)
 	}
 
 	cmdStr := strings.TrimSpace(step.Run)
@@ -204,10 +204,14 @@ func runStep(ctx context.Context, opts ExecuteOpts, run *RunInfo, stageID, wsDir
 //   - composite: 本轮不支持, 返显式错 (留 E9.1.4 实现)
 //   - javascript: 不支持
 //
+// 安全:
+//   - action.NeedsSecrets 中每一项必须由 stage.secrets[] 或 step.with[] 显式提供,
+//     否则拒绝执行 (T9.1.5). 这把"插件想偷偷读 env 里的 secret"挡掉了 — 必须用户主动授权.
+//
 // 出错路径:
 //   - Resolver 报 ErrNotInstalled / 版本不匹配 → 直接返 user-friendly error
 //   - docker run 退出非 0 → exit code 透出
-func runPlugin(ctx context.Context, opts ExecuteOpts, run *RunInfo, stageID, wsDir string, step *dsl.Step) (int, map[string]any, error) {
+func runPlugin(ctx context.Context, opts ExecuteOpts, run *RunInfo, stageID, wsDir string, step *dsl.Step, stageSecrets []string) (int, map[string]any, error) {
 	ref, err := plugin.ParseRef(step.Uses)
 	if err != nil {
 		return 1, nil, err
@@ -217,6 +221,12 @@ func runPlugin(ctx context.Context, opts ExecuteOpts, run *RunInfo, stageID, wsD
 		return 1, nil, err
 	}
 	action := resolved.Action
+
+	// 强制 needs_secrets 授权 (T9.1.5)
+	if missing := checkSecretsAuthorized(action.NeedsSecrets, stageSecrets, step.With); len(missing) > 0 {
+		return 1, nil, fmt.Errorf("plugin %s@%s: needs_secrets not authorized — declare in stage.secrets[] or step.with[]: missing %v",
+			resolved.Slug, resolved.Version, missing)
+	}
 
 	switch action.Runs.Using {
 	case "container":
@@ -228,6 +238,35 @@ func runPlugin(ctx context.Context, opts ExecuteOpts, run *RunInfo, stageID, wsD
 		return 1, nil, fmt.Errorf("plugin %s@%s uses=%q not supported",
 			resolved.Slug, resolved.Version, action.Runs.Using)
 	}
+}
+
+// checkSecretsAuthorized 返回 action.needs_secrets 中, 没在 stageSecrets 或 stepWith 出现的项.
+//
+// 匹配规则:
+//   - stage.secrets[] 是 NAME 列表 — 大小写敏感; 命中即视为授权
+//   - step.with[] 是 key→value map — 把 KEY 拿出来跟 needs_secrets 做不区分大小写匹配
+//     (用户在 with 里通常写 webhook: ${{ secrets.DINGTALK_WEBHOOK }}, key 是小写, 但 expr 引用了 secret)
+func checkSecretsAuthorized(needs []string, stageSecrets []string, stepWith map[string]any) []string {
+	if len(needs) == 0 {
+		return nil
+	}
+	provided := make(map[string]bool, len(stageSecrets)+len(stepWith))
+	for _, s := range stageSecrets {
+		provided[s] = true
+		provided[strings.ToUpper(s)] = true
+	}
+	for k := range stepWith {
+		provided[k] = true
+		provided[strings.ToUpper(k)] = true
+	}
+	var missing []string
+	for _, n := range needs {
+		if provided[n] || provided[strings.ToUpper(n)] {
+			continue
+		}
+		missing = append(missing, n)
+	}
+	return missing
 }
 
 // runPluginContainer 跑容器化插件. 使用 `docker run` 二进制 (host 必须有).
@@ -249,13 +288,27 @@ func runPluginContainer(ctx context.Context, opts ExecuteOpts, run *RunInfo, sta
 	}
 
 	containerWsDir := "/github/workspace"
-	dockerArgs := []string{"run", "--rm",
-		"-v", wsDir + ":" + containerWsDir,
-		"-w", containerWsDir,
-		"-e", "HELIOS_WORKSPACE=" + containerWsDir,
-		"-e", fmt.Sprintf("HELIOS_RUN_ID=%d", run.ID),
-		"-e", "HELIOS_STAGE_ID=" + stageID,
+	dockerArgs := []string{"run", "--rm"}
+	// 镜像拉取策略: action.runs.pull_policy → docker --pull
+	// 支持值: Always / IfNotPresent (默认) / Never. docker --pull 接 always|missing|never.
+	switch strings.ToLower(action.Runs.PullPolicy) {
+	case "always":
+		dockerArgs = append(dockerArgs, "--pull", "always")
+	case "never":
+		dockerArgs = append(dockerArgs, "--pull", "never")
+	case "ifnotpresent", "":
+		dockerArgs = append(dockerArgs, "--pull", "missing")
+	default:
+		return 1, nil, fmt.Errorf("plugin %s: invalid pull_policy %q (allowed: Always/IfNotPresent/Never)",
+			resolved.Slug, action.Runs.PullPolicy)
 	}
+	dockerArgs = append(dockerArgs,
+		"-v", wsDir+":"+containerWsDir,
+		"-w", containerWsDir,
+		"-e", "HELIOS_WORKSPACE="+containerWsDir,
+		"-e", fmt.Sprintf("HELIOS_RUN_ID=%d", run.ID),
+		"-e", "HELIOS_STAGE_ID="+stageID,
+	)
 	// inputs → INPUT_<UPPER>
 	for k, v := range step.With {
 		envKey := "INPUT_" + strings.ToUpper(k)
