@@ -24,6 +24,8 @@ interface EditorState {
   updateNodeData: (id: string, patch: Record<string, unknown>) => void;
   setValidationErrors: (errors: ValidateError[]) => void;
   setValidationLoading: (loading: boolean) => void;
+  removeNode: (id: string) => void;
+  duplicateNode: (id: string) => void;
 }
 
 export const useEditorStore = create<EditorState>((set, get) => ({
@@ -69,4 +71,30 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   setValidationErrors: (errors) => set({ validationErrors: errors }),
   setValidationLoading: (loading) => set({ validationLoading: loading }),
+
+  removeNode: (id) => {
+    set((state) => ({
+      nodes: state.nodes.filter((n) => n.id !== id),
+      edges: state.edges.filter((e) => e.source !== id && e.target !== id),
+      selectedNodeId: state.selectedNodeId === id ? null : state.selectedNodeId,
+    }));
+  },
+
+  duplicateNode: (id) => {
+    set((state) => {
+      const src = state.nodes.find((n) => n.id === id);
+      if (!src) return state;
+      const newId = `${id}-copy-${Date.now()}`;
+      const newNode: Node = {
+        ...src,
+        id: newId,
+        position: { x: src.position.x + 20, y: src.position.y + 20 },
+        selected: false,
+      };
+      return {
+        nodes: [...state.nodes, newNode],
+        selectedNodeId: newId,
+      };
+    });
+  },
 }));

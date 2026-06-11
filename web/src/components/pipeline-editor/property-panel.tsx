@@ -33,6 +33,8 @@ export default function PropertyPanel() {
   const selectedNodeId = useEditorStore((s) => s.selectedNodeId);
   const nodes = useEditorStore((s) => s.nodes);
   const updateNodeData = useEditorStore((s) => s.updateNodeData);
+  const removeNode = useEditorStore((s) => s.removeNode);
+  const duplicateNode = useEditorStore((s) => s.duplicateNode);
 
   const node = nodes.find((n) => n.id === selectedNodeId);
 
@@ -245,8 +247,8 @@ export default function PropertyPanel() {
       )}
 
       <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
-        <button className="btn bsm">复制</button>
-        <button className="btn bsm btn-ghost" style={{ color: "var(--danger)" }}>
+        <button className="btn bsm" onClick={() => duplicateNode(node.id)}>复制</button>
+        <button className="btn bsm btn-ghost" style={{ color: "var(--danger)" }} onClick={() => removeNode(node.id)}>
           删除
         </button>
       </div>
