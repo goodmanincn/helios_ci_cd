@@ -1,6 +1,7 @@
 package runengine
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"database/sql"
@@ -16,6 +17,7 @@ import (
 	"github.com/helios-cicd/helios/api/pkg/builtin"
 	"github.com/helios-cicd/helios/api/pkg/dsl"
 	"github.com/helios-cicd/helios/api/pkg/engine"
+	"github.com/helios-cicd/helios/api/pkg/plugin"
 )
 
 // ExecuteOpts stage 执行依赖。
@@ -25,6 +27,12 @@ type ExecuteOpts struct {
 	ArtifactRoot string
 	Timeout      time.Duration
 	LogWriter    io.Writer // 可选: 追加到 stage 日志
+
+	// PluginResolver: 解析 step.Uses 的"<ns>/<name>@<ver>" 引用 (M9).
+	// 为 nil 时插件路径走 builtin 注册表 fallback, 不命中则报错.
+	PluginResolver plugin.Resolver
+	// PluginOrgID: Resolve 时传入的 org 隔离 ID. <=0 时不限 org (仅查官方 verified).
+	PluginOrgID int64
 }
 
 // ExecuteStage 执行单个 stage 的全部 steps。
@@ -121,28 +129,31 @@ func runStep(ctx context.Context, opts ExecuteOpts, run *RunInfo, stageID, wsDir
 	defer cancel()
 
 	if step.Uses != "" {
-		b, ok := builtin.Lookup(step.Uses)
-		if !ok {
-			return 1, nil, fmt.Errorf("unknown builtin %s", step.Uses)
+		if b, ok := builtin.Lookup(step.Uses); ok {
+			inputs := map[string]any{}
+			for k, v := range step.With {
+				inputs[k] = v
+			}
+			var logBuf bytes.Buffer
+			logW := io.Writer(&logBuf)
+			if opts.LogWriter != nil {
+				logW = io.MultiWriter(&logBuf, opts.LogWriter)
+			}
+			execCtx := builtin.ExecContext{
+				Ctx: runCtx, RunID: run.ID, StageID: stageID, WorkDir: wsDir,
+				Storage: storage, Log: logW,
+			}
+			out, err := b.Run(&execCtx, inputs)
+			if err != nil {
+				return 1, nil, err
+			}
+			return 0, out, nil
 		}
-		inputs := map[string]any{}
-		for k, v := range step.With {
-			inputs[k] = v
+		// 不在 builtin 注册表 → 走 plugin marketplace 解析
+		if opts.PluginResolver == nil {
+			return 1, nil, fmt.Errorf("unknown uses %q (no builtin, no plugin resolver wired)", step.Uses)
 		}
-		var logBuf bytes.Buffer
-		logW := io.Writer(&logBuf)
-		if opts.LogWriter != nil {
-			logW = io.MultiWriter(&logBuf, opts.LogWriter)
-		}
-		execCtx := builtin.ExecContext{
-			Ctx: runCtx, RunID: run.ID, StageID: stageID, WorkDir: wsDir,
-			Storage: storage, Log: logW,
-		}
-		out, err := b.Run(&execCtx, inputs)
-		if err != nil {
-			return 1, nil, err
-		}
-		return 0, out, nil
+		return runPlugin(runCtx, opts, run, stageID, wsDir, step)
 	}
 
 	cmdStr := strings.TrimSpace(step.Run)
@@ -183,4 +194,146 @@ func runStep(ctx context.Context, opts ExecuteOpts, run *RunInfo, stageID, wsDir
 		return exitCode, nil, fmt.Errorf("step exited %d", exitCode)
 	}
 	return 0, nil, nil
+}
+
+// runPlugin 把 step.Uses 解析成 plugin.Resolved 后执行 (M9).
+//
+// 执行策略 (按 action.runs.using 分支):
+//   - container: shell out 到 `docker run` (host 必须有 docker CLI); 把 inputs 转 INPUT_*
+//                环境变量; workspace 挂到 /github/workspace; stdout 收集 ::set-output 协议
+//   - composite: 本轮不支持, 返显式错 (留 E9.1.4 实现)
+//   - javascript: 不支持
+//
+// 出错路径:
+//   - Resolver 报 ErrNotInstalled / 版本不匹配 → 直接返 user-friendly error
+//   - docker run 退出非 0 → exit code 透出
+func runPlugin(ctx context.Context, opts ExecuteOpts, run *RunInfo, stageID, wsDir string, step *dsl.Step) (int, map[string]any, error) {
+	ref, err := plugin.ParseRef(step.Uses)
+	if err != nil {
+		return 1, nil, err
+	}
+	resolved, err := opts.PluginResolver.Resolve(ctx, opts.PluginOrgID, ref)
+	if err != nil {
+		return 1, nil, err
+	}
+	action := resolved.Action
+
+	switch action.Runs.Using {
+	case "container":
+		return runPluginContainer(ctx, opts, run, stageID, wsDir, resolved, step)
+	case "composite":
+		return 1, nil, fmt.Errorf("plugin %s@%s uses=composite: composite plugins not yet supported (MVP, see E9.1.4)",
+			resolved.Slug, resolved.Version)
+	default:
+		return 1, nil, fmt.Errorf("plugin %s@%s uses=%q not supported",
+			resolved.Slug, resolved.Version, action.Runs.Using)
+	}
+}
+
+// runPluginContainer 跑容器化插件. 使用 `docker run` 二进制 (host 必须有).
+//
+// inputs → 环境变量:  INPUT_<UPPER_NAME>=value
+// outputs 协议:       子进程 stdout 写  ::set-output name=X::value
+//
+// 挂载:
+//   - workspace 双绑到 /github/workspace 与 wsDir (后者保 HELIOS_WORKSPACE env 一致)
+//
+// 这里走 CLI 而不是 Docker daemon SDK, 是为了让 runengine 不强依赖 docker SDK
+// (runengine 同时被 handler 测试构建; SDK 会拖入很重的依赖链). 真实生产用 worker 端
+// dockerrun.Executor 是另一码事.
+func runPluginContainer(ctx context.Context, opts ExecuteOpts, run *RunInfo, stageID, wsDir string, resolved *plugin.Resolved, step *dsl.Step) (int, map[string]any, error) {
+	action := resolved.Action
+	if _, err := exec.LookPath("docker"); err != nil {
+		return 1, nil, fmt.Errorf("plugin %s: docker CLI not found on host (required for container plugins)",
+			resolved.Slug)
+	}
+
+	containerWsDir := "/github/workspace"
+	dockerArgs := []string{"run", "--rm",
+		"-v", wsDir + ":" + containerWsDir,
+		"-w", containerWsDir,
+		"-e", "HELIOS_WORKSPACE=" + containerWsDir,
+		"-e", fmt.Sprintf("HELIOS_RUN_ID=%d", run.ID),
+		"-e", "HELIOS_STAGE_ID=" + stageID,
+	}
+	// inputs → INPUT_<UPPER>
+	for k, v := range step.With {
+		envKey := "INPUT_" + strings.ToUpper(k)
+		dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("%s=%v", envKey, v))
+	}
+	// action.runs.env
+	for k, v := range action.Runs.Env {
+		dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("%s=%s", k, v))
+	}
+
+	// entrypoint + args
+	if len(action.Runs.Entrypoint) > 0 {
+		dockerArgs = append(dockerArgs, "--entrypoint", action.Runs.Entrypoint[0])
+		// entrypoint 后续元素无法直接走 --entrypoint, 拼到 command 末尾
+	}
+	dockerArgs = append(dockerArgs, action.Runs.Image)
+	if len(action.Runs.Entrypoint) > 1 {
+		dockerArgs = append(dockerArgs, action.Runs.Entrypoint[1:]...)
+	}
+	dockerArgs = append(dockerArgs, action.Runs.Args...)
+
+	logPath := filepath.Join(opts.WorkspaceDir, fmt.Sprintf("%d", run.ID), "stages", stageID+".log")
+	_ = os.MkdirAll(filepath.Dir(logPath), 0o755)
+	logFile, ferr := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if ferr != nil {
+		return 1, nil, ferr
+	}
+	defer logFile.Close()
+
+	var stdoutBuf bytes.Buffer
+	stdoutTee := io.MultiWriter(&stdoutBuf, logFile)
+
+	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
+	cmd.Stdout = stdoutTee
+	cmd.Stderr = logFile
+
+	runErr := cmd.Run()
+	exitCode := 0
+	if runErr != nil {
+		if exitErr, ok := runErr.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			return -1, nil, runErr
+		}
+	}
+	outputs := parseSetOutputs(stdoutBuf.Bytes())
+	if exitCode != 0 {
+		return exitCode, outputs, fmt.Errorf("plugin %s@%s exited %d",
+			resolved.Slug, resolved.Version, exitCode)
+	}
+	return 0, outputs, nil
+}
+
+// parseSetOutputs 扫描 stdout 抽 `::set-output name=K::V` 行 (GitHub Actions 协议).
+//
+// 多行重复同名以最后一次为准. value 取到行尾 (不再进一步 trim).
+func parseSetOutputs(b []byte) map[string]any {
+	out := map[string]any{}
+	scanner := bufio.NewScanner(bytes.NewReader(b))
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	const prefix = "::set-output name="
+	for scanner.Scan() {
+		line := scanner.Text()
+		i := strings.Index(line, prefix)
+		if i < 0 {
+			continue
+		}
+		rest := line[i+len(prefix):]
+		sep := strings.Index(rest, "::")
+		if sep < 0 {
+			continue
+		}
+		name := strings.TrimSpace(rest[:sep])
+		val := rest[sep+2:]
+		if name == "" {
+			continue
+		}
+		out[name] = val
+	}
+	return out
 }

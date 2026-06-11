@@ -10,6 +10,7 @@ import (
 	"github.com/hibiken/asynq"
 
 	"github.com/helios-cicd/helios/api/pkg/logstream"
+	"github.com/helios-cicd/helios/api/pkg/plugin"
 	"github.com/helios-cicd/helios/api/pkg/queue"
 	"github.com/helios-cicd/helios/api/pkg/runengine"
 	"github.com/helios-cicd/helios/api/pkg/runstate"
@@ -25,6 +26,10 @@ type StageExecuteHandler struct {
 	timeout      time.Duration
 	enq          *queue.AsynqEnqueuer
 	logs         *logstream.Writer
+
+	// PluginResolver 解析 step.Uses 到 plugin marketplace (M9).
+	// nil 时只能用 builtin step.
+	pluginResolver plugin.Resolver
 }
 
 // NewStageExecute 构造。
@@ -36,6 +41,12 @@ func NewStageExecute(db *sql.DB, machine *runstate.Machine, workspaceDir, artifa
 		db: db, machine: machine, workspaceDir: workspaceDir,
 		artifactRoot: artifactRoot, timeout: timeout, enq: enq, logs: logs,
 	}
+}
+
+// WithPluginResolver 注入插件解析器 (M9). 链式返回自身.
+func (h *StageExecuteHandler) WithPluginResolver(r plugin.Resolver) *StageExecuteHandler {
+	h.pluginResolver = r
+	return h
 }
 
 func (h *StageExecuteHandler) ProcessTask(ctx context.Context, t *asynq.Task) error {
@@ -60,6 +71,9 @@ func (h *StageExecuteHandler) ProcessTask(ctx context.Context, t *asynq.Task) er
 	opts := runengine.ExecuteOpts{
 		DB: h.db, WorkspaceDir: h.workspaceDir,
 		ArtifactRoot: h.artifactRoot, Timeout: h.timeout,
+		PluginResolver: h.pluginResolver,
+		// PluginOrgID 留 0: resolver 走"官方 verified 隐式可用"路径.
+		// MVP 简化, 真正 multi-tenant 隔离待引入 runs.org_id 列后传入.
 	}
 	ok, exitCode, execErr := runengine.ExecuteStage(ctx, opts, p.RunID, p.ProjectID, p.StageRecordID, p.StageID)
 	if execErr != nil {

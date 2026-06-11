@@ -35,6 +35,7 @@ import (
 	"github.com/helios-cicd/helios/api/pkg/logarchive"
 	"github.com/helios-cicd/helios/api/pkg/logstream"
 	"github.com/helios-cicd/helios/api/pkg/metrics"
+	"github.com/helios-cicd/helios/api/pkg/plugin"
 	"github.com/helios-cicd/helios/api/pkg/queue"
 	"github.com/helios-cicd/helios/api/pkg/runstate"
 )
@@ -88,6 +89,12 @@ func main() {
 		log.Printf("warning: builtin template seed failed: %v", err)
 	} else if n > 0 {
 		log.Printf("seeded %d builtin pipeline templates", n)
+	}
+	// M9: 写入官方插件 (helios/echo, helios/trivy, helios/dingtalk)
+	if n, err := plugin.SeedOfficial(gdb); err != nil {
+		log.Printf("warning: official plugin seed failed: %v", err)
+	} else if n > 0 {
+		log.Printf("seeded %d official plugins", n)
 	}
 	userSvc := service.NewUserService(gdb)
 	projectSvc := service.NewProjectService(repository.NewProjectRepository(gdb))
@@ -183,6 +190,7 @@ func main() {
 	handler.NewHostHandler(gdb).Register(protected)
 	handler.NewHostGroupHandler(gdb).Register(protected)
 	handler.NewPipelineTemplateHandler(gdb).Register(protected)
+	handler.NewPluginHandler(gdb).Register(protected)
 
 	addr := os.Getenv("HELIOS_API_ADDR")
 	if addr == "" {

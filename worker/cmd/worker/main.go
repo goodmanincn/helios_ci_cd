@@ -18,6 +18,7 @@ import (
 	"github.com/helios-cicd/helios/api/pkg/git"
 	"github.com/helios-cicd/helios/api/pkg/logarchive"
 	"github.com/helios-cicd/helios/api/pkg/logstream"
+	"github.com/helios-cicd/helios/api/pkg/plugin"
 	"github.com/helios-cicd/helios/api/pkg/projectrepo"
 	"github.com/helios-cicd/helios/api/pkg/queue"
 	"github.com/helios-cicd/helios/api/pkg/runengine"
@@ -122,7 +123,8 @@ func main() {
 		log.Fatalf("mkdir artifact root %s: %v", artifactRoot, err)
 	}
 	orchestrateH := handler.NewOrchestrate(db, machine, workspaceDir, enq, archiveSvc)
-	stageExecH := handler.NewStageExecute(db, machine, workspaceDir, artifactRoot, buildTimeout, enq, logsWriter)
+	stageExecH := handler.NewStageExecute(db, machine, workspaceDir, artifactRoot, buildTimeout, enq, logsWriter).
+		WithPluginResolver(plugin.NewSQLResolver(db))
 	ghProvider := git.NewGitHubProvider(git.GitHubConfig{
 		Token: os.Getenv("HELIOS_GITHUB_TOKEN"),
 	})
