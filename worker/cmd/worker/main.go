@@ -23,6 +23,7 @@ import (
 	"github.com/helios-cicd/helios/api/pkg/runrepo"
 	"github.com/helios-cicd/helios/api/pkg/runstate"
 	"github.com/helios-cicd/helios/api/pkg/tasks"
+	"github.com/helios-cicd/helios/worker/internal/clusterhealth"
 	"github.com/helios-cicd/helios/worker/internal/dockerrun"
 	"github.com/helios-cicd/helios/worker/internal/gitrunner"
 	"github.com/helios-cicd/helios/worker/internal/handler"
@@ -126,6 +127,9 @@ func main() {
 
 	// T2.6.3: 审批超时 handler (asynq critical 队列).
 	approvalTimeoutH := handler.NewApprovalTimeout(approval.NewTimeouter(db, machine))
+
+	// T4.1.4: 集群健康检查定时任务.
+	clusterhealth.Start(db)
 
 	// === Asynq server ===
 	srv := asynq.NewServer(

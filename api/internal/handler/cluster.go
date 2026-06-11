@@ -2,6 +2,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -74,12 +75,14 @@ func (h *ClusterHandler) create(c *gin.Context) {
 	if !ok {
 		return
 	}
+	configMap := map[string]string{"kubeconfig": req.Kubeconfig}
+	configBytes, _ := json.Marshal(configMap)
 	cl := &model.Cluster{
 		OrgID:    orgID,
 		Name:     req.Name,
 		Provider: req.Provider,
 		Region:   req.Region,
-		Config:   datatypes.JSON(`{"kubeconfig":""}`), // 占位,后续加密存 secrets 表
+		Config:   datatypes.JSON(configBytes),
 		Status:   "unknown",
 	}
 	if err := h.store.Create(cl); err != nil {
