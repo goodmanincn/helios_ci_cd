@@ -1,6 +1,8 @@
 // Package handler — pipeline.go: pipeline DSL 校验/编辑/版本 API (M2/M3)。
 //
 // 端点:
+//   - GET  /api/v1/pipelines — 列表 (?project_id=)
+//   - GET  /api/v1/pipelines/:id — 详情 (含 current spec_raw)
 //   - POST /api/v1/pipelines/validate — 只校验不入库
 //   - PUT  /api/v1/pipelines/:id/spec — 保存 spec,创建新版本
 //   - GET  /api/v1/pipelines/:id/versions — 版本历史列表
@@ -29,10 +31,119 @@ func NewPipelineHandler(db *gorm.DB) *PipelineHandler { return &PipelineHandler{
 
 // Register 挂到受保护 /api/v1。
 func (h *PipelineHandler) Register(g *gin.RouterGroup) {
+	g.GET("/pipelines", h.list)
+	g.GET("/pipelines/:id", h.get)
 	g.POST("/pipelines/validate", h.validate)
 	g.PUT("/pipelines/:id/spec", h.updateSpec)
 	g.GET("/pipelines/:id/versions", h.listVersions)
 	g.POST("/pipelines/:id/versions/:v/restore", h.restoreVersion)
+}
+
+// ===== GET /pipelines =====
+
+type pipelineView struct {
+	ID               int64  `json:"id"`
+	ProjectID        int64  `json:"project_id"`
+	Name             string `json:"name"`
+	Description      string `json:"description,omitempty"`
+	CurrentVersionID *int64 `json:"current_version_id,omitempty"`
+	Enabled          bool   `json:"enabled"`
+	CreatedAt        string `json:"created_at"`
+	UpdatedAt        string `json:"updated_at"`
+	SpecRaw          string `json:"spec_raw,omitempty"`
+	Version          int    `json:"version,omitempty"`
+}
+
+func (h *PipelineHandler) list(c *gin.Context) {
+	orgID, ok := activeOrg(c)
+	if !ok {
+		return
+	}
+	q := h.db.WithContext(c.Request.Context()).
+		Model(&model.Pipeline{}).
+		Joins("JOIN projects ON projects.id = pipelines.project_id").
+		Where("projects.org_id = ?", orgID).
+		Where("pipelines.deleted_at IS NULL")
+
+	if pidStr := c.Query("project_id"); pidStr != "" {
+		pid, err := strconv.ParseInt(pidStr, 10, 64)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid project_id"})
+			return
+		}
+		q = q.Where("pipelines.project_id = ?", pid)
+	}
+
+	var pipelines []model.Pipeline
+	if err := q.Order("pipelines.id DESC").Limit(200).Find(&pipelines).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "query failed"})
+		return
+	}
+
+	out := make([]pipelineView, 0, len(pipelines))
+	for _, p := range pipelines {
+		out = append(out, pipelineView{
+			ID:               p.ID,
+			ProjectID:        p.ProjectID,
+			Name:             p.Name,
+			Description:      p.Description,
+			CurrentVersionID: p.CurrentVersionID,
+			Enabled:          p.Enabled,
+			CreatedAt:        p.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+			UpdatedAt:        p.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		})
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+// ===== GET /pipelines/:id =====
+
+func (h *PipelineHandler) get(c *gin.Context) {
+	orgID, ok := activeOrg(c)
+	if !ok {
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid pipeline id"})
+		return
+	}
+
+	var p model.Pipeline
+	err = h.db.WithContext(c.Request.Context()).
+		Joins("JOIN projects ON projects.id = pipelines.project_id").
+		Where("projects.org_id = ?", orgID).
+		Where("pipelines.id = ?", id).
+		First(&p).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "pipeline not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "query failed"})
+		return
+	}
+
+	view := pipelineView{
+		ID:               p.ID,
+		ProjectID:        p.ProjectID,
+		Name:             p.Name,
+		Description:      p.Description,
+		CurrentVersionID: p.CurrentVersionID,
+		Enabled:          p.Enabled,
+		CreatedAt:        p.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:        p.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+	}
+
+	if p.CurrentVersionID != nil {
+		var pv model.PipelineVersion
+		if err := h.db.First(&pv, *p.CurrentVersionID).Error; err == nil {
+			view.SpecRaw = pv.SpecRaw
+			view.Version = pv.Version
+		}
+	}
+
+	c.JSON(http.StatusOK, view)
 }
 
 // ===== /pipelines/validate =====

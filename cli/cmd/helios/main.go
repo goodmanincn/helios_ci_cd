@@ -1,18 +1,22 @@
-// Package main helios CLI 占位 — 后续 M8 接入 Cobra
+// Package main helios CLI 入口.
+//
+// 实际命令树定义在 internal/cmd, main 只做 ldflags 注入 + 启动.
 package main
 
 import (
-	"fmt"
 	"os"
+
+	"github.com/helios-cicd/helios/cli/internal/cmd"
 )
 
-var Version = "dev"
+// Version / BuildTime / GitCommit 由 ldflags 注入, 默认 dev.
+var (
+	Version   = "dev"
+	BuildTime = "unknown"
+	GitCommit = "unknown"
+)
 
 func main() {
-	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
-		fmt.Printf("helios %s\n", Version)
-		return
-	}
-	fmt.Println("helios CLI — placeholder. Full implementation lands in M8.")
-	fmt.Println("Usage: helios [--version]")
+	cmd.Version = Version
+	os.Exit(cmd.Execute())
 }

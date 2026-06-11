@@ -53,17 +53,17 @@ func builtins() []model.PipelineTemplate {
 		{
 			Slug:        "node-docker-k8s",
 			Name:        "Node.js + Docker + K8s",
-			Description: "pnpm install → test → 镜像构建推送 → K8s rolling 部署",
+			Description: "pnpm install → test → 镜像构建 → staging 部署 → 审批 → 生产 rolling 部署",
 			Category:    "fullstack",
-			Tags:        []string{"node", "docker", "k8s"},
+			Tags:        []string{"node", "docker", "k8s", "approval"},
 			SpecRaw:     nodeDockerK8sYAML,
 		},
 		{
 			Slug:        "go-multi-platform",
-			Name:        "Go 多平台二进制",
-			Description: "go test → 矩阵构建 (linux/darwin × amd64/arm64)",
+			Name:        "Go 多平台二进制 + GitHub Release",
+			Description: "go test → 矩阵构建 (linux/darwin/windows × amd64/arm64) → GitHub Release 上传 6 个 binary",
 			Category:    "release",
-			Tags:        []string{"go", "release"},
+			Tags:        []string{"go", "release", "matrix"},
 			SpecRaw:     goMultiPlatformYAML,
 		},
 		{
@@ -74,13 +74,29 @@ func builtins() []model.PipelineTemplate {
 			Tags:        []string{"node", "static", "s3"},
 			SpecRaw:     staticSiteYAML,
 		},
+		{
+			Slug:        "python-pypi",
+			Name:        "Python + PyPI 发布",
+			Description: "pytest 单元测试 → build + twine 发布到 PyPI",
+			Category:    "release",
+			Tags:        []string{"python", "pypi", "test"},
+			SpecRaw:     pythonPyPIYAML,
+		},
+		{
+			Slug:        "multi-cloud-tke-ack",
+			Name:        "多云容器部署 (TKE + ACK)",
+			Description: "镜像构建 → TKE / ACK 矩阵并行 rolling 部署",
+			Category:    "deploy",
+			Tags:        []string{"k8s", "tke", "ack", "matrix", "multi-cloud"},
+			SpecRaw:     multiCloudYAML,
+		},
 	}
 }
 
-// 三个内置模板的 YAML — 都用 spec/04 § 4 的语法, 跑 dsl.ValidateRaw 必过。
+// 五个内置模板的 YAML — 都用 spec/04 § 4 的语法, 跑 dsl.ValidateRaw 必过。
 const nodeDockerK8sYAML = `version: "1"
 name: "node-docker-k8s"
-description: "Node.js 项目: 装依赖 / 测试 / 构镜像 / 部署到 K8s"
+description: "Node.js 项目: 装依赖 / 测试 / 构镜像 / 审批后部署到 K8s"
 
 triggers:
   - on: push
@@ -116,19 +132,38 @@ stages:
             --dockerfile=Dockerfile \
             --destination=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
 
-  - id: deploy
-    name: "K8s 部署"
+  - id: deploy-staging
+    name: "Staging 部署"
     needs: [build-image]
-    runs-on: { type: container, image: "bitnami/kubectl:latest" }
-    steps:
-      - run: |
-          kubectl set image deployment/app app=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-          kubectl rollout status deployment/app
+    uses: "helios/k8s-deploy@v1"
+    with:
+      cluster: staging-k8s
+      namespace: app
+      image: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+      strategy: rolling
+
+  - id: approval
+    name: "生产部署审批"
+    needs: [deploy-staging]
+    type: approval
+    approvers: [admin, ops]
+    mode: any
+    timeout: 24h
+
+  - id: deploy-prod
+    name: "生产 Rolling 部署"
+    needs: [approval]
+    uses: "helios/k8s-deploy@v1"
+    with:
+      cluster: prod-k8s
+      namespace: app
+      image: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+      strategy: rolling
 `
 
 const goMultiPlatformYAML = `version: "1"
 name: "go-multi-platform"
-description: "Go 项目: 测试 + 多平台二进制"
+description: "Go 项目: 测试 + 多平台二进制 + GitHub Release"
 
 triggers:
   - on: push
@@ -149,12 +184,34 @@ stages:
     needs: [test]
     runs-on: { type: container, image: "golang:1.22" }
     matrix:
-      os: [linux, darwin]
+      os: [linux, darwin, windows]
       arch: [amd64, arm64]
     steps:
       - run: |
+          ext=""
+          if [ "${{ matrix.os }}" = "windows" ]; then ext=".exe"; fi
           GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} \
-            go build -o bin/app-${{ matrix.os }}-${{ matrix.arch }} ./cmd/app
+            go build -o bin/app-${{ matrix.os }}-${{ matrix.arch }}${ext} ./cmd/app
+      - uses: "helios/upload-artifact@v1"
+        with:
+          name: bin-${{ matrix.os }}-${{ matrix.arch }}
+          path: bin/*
+
+  - id: release
+    name: "GitHub Release"
+    needs: [build]
+    runs-on: { type: container, image: "golang:1.22" }
+    steps:
+      - uses: "helios/download-artifact@v1"
+        with:
+          name: bin-linux-amd64
+          path: release/
+      - run: |
+          gh release upload ${{ github.ref_name }} release/* \
+            --repo ${{ github.repo_url }} \
+            --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 `
 
 const staticSiteYAML = `version: "1"
@@ -182,4 +239,67 @@ stages:
     runs-on: { type: container, image: "amazon/aws-cli:latest" }
     steps:
       - run: aws s3 sync out/ s3://my-bucket/ --delete
+`
+
+const pythonPyPIYAML = `version: "1"
+name: "python-pypi"
+description: "Python 项目: pytest + PyPI 发布"
+
+triggers:
+  - on: push
+    tags: ["v*"]
+
+stages:
+  - id: test
+    name: "单元测试"
+    runs-on: { type: container, image: "python:3.12-slim" }
+    steps:
+      - run: |
+          pip install -r requirements-dev.txt
+          pytest -v --cov=.
+
+  - id: publish
+    name: "发布到 PyPI"
+    needs: [test]
+    runs-on: { type: container, image: "python:3.12-slim" }
+    steps:
+      - run: |
+          pip install build twine
+          python -m build
+          twine upload dist/* -u __token__ -p ${{ secrets.PYPI_TOKEN }}
+`
+
+const multiCloudYAML = `version: "1"
+name: "multi-cloud-tke-ack"
+description: "多云矩阵: TKE + ACK 并行 rolling 部署"
+
+triggers:
+  - on: push
+    branches: [main]
+
+env:
+  REGISTRY: ccr.example.com/acme
+  IMAGE_NAME: app
+
+stages:
+  - id: build-image
+    name: "构建镜像"
+    runs-on: { type: container, image: "gcr.io/kaniko-project/executor:latest" }
+    steps:
+      - run: |
+          /kaniko/executor \
+            --dockerfile=Dockerfile \
+            --destination=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+  - id: deploy
+    name: "多云矩阵部署"
+    needs: [build-image]
+    matrix:
+      cluster: [prod-tke, prod-ack]
+    uses: "helios/k8s-deploy@v1"
+    with:
+      cluster: ${{ matrix.cluster }}
+      namespace: app
+      image: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+      strategy: rolling
 `
