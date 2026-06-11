@@ -4,6 +4,7 @@ import { useState } from "react";
 import FlowCanvas from "./flow-canvas";
 import StepLibraryPanel from "./step-library-panel";
 import PropertyPanel from "./property-panel";
+import YamlTab from "./yaml-tab";
 
 type TabKey = "canvas" | "yaml" | "triggers" | "variables" | "history";
 
@@ -168,7 +169,9 @@ export default function EditorShell({ pipelineId }: { pipelineId: string }) {
         </div>
       )}
 
-      {tab !== "canvas" && (
+      {tab === "yaml" && <YamlTab />}
+
+      {tab !== "canvas" && tab !== "yaml" && (
         <div
           style={{
             flex: 1,
