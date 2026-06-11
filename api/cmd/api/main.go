@@ -29,9 +29,11 @@ import (
 	"github.com/helios-cicd/helios/api/internal/service"
 	heliosCrypto "github.com/helios-cicd/helios/api/pkg/crypto"
 	"github.com/helios-cicd/helios/api/pkg/git"
+	"github.com/helios-cicd/helios/api/pkg/health"
 	heliosjwt "github.com/helios-cicd/helios/api/pkg/jwt"
 	"github.com/helios-cicd/helios/api/pkg/logarchive"
 	"github.com/helios-cicd/helios/api/pkg/logstream"
+	"github.com/helios-cicd/helios/api/pkg/metrics"
 	"github.com/helios-cicd/helios/api/pkg/queue"
 	"github.com/helios-cicd/helios/api/pkg/runstate"
 )
@@ -118,7 +120,29 @@ func main() {
 	r.Use(gin.Recovery())
 	r.Use(requestLogger())
 	r.Use(corsMiddleware())
+	r.Use(metrics.GinMiddleware())
 
+	// /metrics — Prometheus 抓取端点 (公开, 内网部署模式)
+	r.GET("/metrics", metrics.Handler())
+
+	// Health / readiness / version — K8s probe 用
+	healthChecker := health.New().WithVersion(Version, BuildTime, GitCommit)
+	healthChecker.Register("postgres", func(ctx context.Context) error {
+		if sqlDB == nil {
+			return errors.New("db not initialized")
+		}
+		return sqlDB.PingContext(ctx)
+	})
+	healthChecker.Register("redis", func(ctx context.Context) error {
+		if rdb == nil {
+			return errors.New("redis not initialized")
+		}
+		return rdb.Ping(ctx).Err()
+	})
+	r.GET("/healthz", healthChecker.Liveness())
+	r.GET("/readyz", healthChecker.Readiness())
+
+	// 旧 /health 端点保留 (兼容现网, 行为同 readyz 但永远 200)
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status": "ok", "service": "helios-api",
@@ -126,9 +150,7 @@ func main() {
 			"timestamp": time.Now().UTC().Format(time.RFC3339),
 		})
 	})
-	r.GET("/version", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"version": Version, "build_time": BuildTime, "git_commit": GitCommit})
-	})
+	r.GET("/version", healthChecker.Version())
 
 	v1 := r.Group("/api/v1")
 	authH.Register(v1.Group("/auth"), authMW)
