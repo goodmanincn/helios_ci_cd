@@ -39,8 +39,8 @@ const NAV_GROUPS: NavGroup[] = [
     title: "基础设施",
     items: [
       { href: "/clusters", label: "集群", icon: "☸", enabled: true },
-      { href: "/hosts", label: "主机", icon: "🖥", enabled: false },
-      { href: "/secrets", label: "密钥", icon: "🔐", enabled: false },
+      { href: "/hosts", label: "主机", icon: "🖥", enabled: true },
+      { href: "/secrets", label: "密钥", icon: "🔐", enabled: true },
     ],
   },
   {

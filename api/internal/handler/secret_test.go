@@ -205,6 +205,95 @@ func TestSecretHandler_OrgScopeMismatch_403(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, resp.StatusCode)
 }
 
+func TestSecretHandler_CloudTypes_Create(t *testing.T) {
+	gdb := openRunTestDB(t)
+	orgID := newSecretFixture(t, gdb)
+	vault := newVaultForTest(t)
+	srv := httptest.NewServer(newSecretRouter(t, gdb, vault, orgID))
+	defer srv.Close()
+
+	tkeValue, _ := json.Marshal(map[string]string{
+		"secret_id": "AKIDxxx", "secret_key": "SKxxx", "region": "ap-guangzhou",
+	})
+	createBody, _ := json.Marshal(map[string]any{
+		"scope": "org", "scope_id": orgID,
+		"name": "tke-creds", "type": "tencent_cloud", "value": string(tkeValue),
+	})
+	resp, err := http.Post(srv.URL+"/api/v1/secrets", "application/json", bytes.NewReader(createBody))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	ackValue, _ := json.Marshal(map[string]string{
+		"access_key_id": "LTAIxxx", "access_key_secret": "SKxxx", "region": "cn-hangzhou",
+	})
+	createBody2, _ := json.Marshal(map[string]any{
+		"scope": "org", "scope_id": orgID,
+		"name": "ack-creds", "type": "aliyun_cloud", "value": string(ackValue),
+	})
+	resp2, err := http.Post(srv.URL+"/api/v1/secrets", "application/json", bytes.NewReader(createBody2))
+	require.NoError(t, err)
+	defer resp2.Body.Close()
+	require.Equal(t, http.StatusCreated, resp2.StatusCode)
+}
+
+func TestSecretHandler_CloudType_InvalidJSON_400(t *testing.T) {
+	gdb := openRunTestDB(t)
+	orgID := newSecretFixture(t, gdb)
+	srv := httptest.NewServer(newSecretRouter(t, gdb, newVaultForTest(t), orgID))
+	defer srv.Close()
+
+	createBody, _ := json.Marshal(map[string]any{
+		"scope": "org", "scope_id": orgID,
+		"name": "bad", "type": "tencent_cloud", "value": "not-json",
+	})
+	resp, err := http.Post(srv.URL+"/api/v1/secrets", "application/json", bytes.NewReader(createBody))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+func TestSecretHandler_DeleteReferenced_409(t *testing.T) {
+	gdb := openRunTestDB(t)
+	orgID := newSecretFixture(t, gdb)
+	vault := newVaultForTest(t)
+	srv := httptest.NewServer(newSecretRouter(t, gdb, vault, orgID))
+	defer srv.Close()
+
+	enc, err := vault.Encrypt([]byte("ssh-key-content"))
+	require.NoError(t, err)
+	sec := model.Secret{
+		Scope: "org", ScopeID: orgID, Name: "ssh-1", Type: "ssh-key",
+		EncryptedValue: enc, EncryptionKEKID: vault.PrimaryID(),
+	}
+	require.NoError(t, gdb.Create(&sec).Error)
+	t.Cleanup(func() {
+		_ = gdb.Exec("DELETE FROM clusters WHERE credential_id = ?", sec.ID).Error
+	})
+
+	credID := sec.ID
+	cl := model.Cluster{
+		OrgID: orgID, Name: "ref-cluster-" + randSuffix(),
+		Provider: "selfhosted", CredentialID: &credID,
+		Config: []byte(`{"kubeconfig":"apiVersion: v1"}`),
+	}
+	require.NoError(t, gdb.Create(&cl).Error)
+	t.Cleanup(func() { _ = gdb.Delete(&cl).Error })
+
+	req, _ := http.NewRequest(http.MethodDelete, srv.URL+"/api/v1/secrets/"+itoa64(sec.ID), nil)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusConflict, resp.StatusCode)
+
+	var body map[string]any
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	refs := body["references"].([]any)
+	require.Len(t, refs, 1)
+	ref := refs[0].(map[string]any)
+	require.Equal(t, "cluster", ref["kind"])
+}
+
 func TestResolveSecrets_EngineEntry(t *testing.T) {
 	gdb := openRunTestDB(t)
 	orgID := newSecretFixture(t, gdb)

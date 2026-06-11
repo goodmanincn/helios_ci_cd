@@ -17,7 +17,9 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -52,20 +54,27 @@ func (h *SecretHandler) Register(g *gin.RouterGroup) {
 
 // ===== DTO =====
 
-type secretView struct {
-	ID          int64  `json:"id"`
-	Scope       string `json:"scope"`
-	ScopeID     int64  `json:"scope_id"`
-	Name        string `json:"name"`
-	Type        string `json:"type"`
-	Description string `json:"description,omitempty"`
-	KEKID       string `json:"kek_id,omitempty"`
-	CreatedBy   *int64 `json:"created_by,omitempty"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+type secretRefView struct {
+	Kind string `json:"kind"` // cluster / host
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
 }
 
-func toSecretView(s *model.Secret) *secretView {
+type secretView struct {
+	ID          int64            `json:"id"`
+	Scope       string           `json:"scope"`
+	ScopeID     int64            `json:"scope_id"`
+	Name        string           `json:"name"`
+	Type        string           `json:"type"`
+	Description string           `json:"description,omitempty"`
+	KEKID       string           `json:"kek_id,omitempty"`
+	References  []secretRefView  `json:"references,omitempty"`
+	CreatedBy   *int64           `json:"created_by,omitempty"`
+	CreatedAt   string           `json:"created_at"`
+	UpdatedAt   string           `json:"updated_at"`
+}
+
+func toSecretView(s *model.Secret, refs []secretRefView) *secretView {
 	return &secretView{
 		ID:          s.ID,
 		Scope:       s.Scope,
@@ -74,6 +83,7 @@ func toSecretView(s *model.Secret) *secretView {
 		Type:        s.Type,
 		Description: s.Description,
 		KEKID:       s.EncryptionKEKID,
+		References:  refs,
 		CreatedBy:   s.CreatedBy,
 		CreatedAt:   s.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:   s.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
@@ -142,9 +152,15 @@ func (h *SecretHandler) list(c *gin.Context) {
 		return
 	}
 
+	ids := make([]int64, len(items))
+	for i := range items {
+		ids[i] = items[i].ID
+	}
+	refMap := loadSecretReferences(c.Request.Context(), h.db, ids)
+
 	out := make([]*secretView, 0, len(items))
 	for i := range items {
-		out = append(out, toSecretView(&items[i]))
+		out = append(out, toSecretView(&items[i], refMap[items[i].ID]))
 	}
 	c.JSON(http.StatusOK, secretListResp{Items: out, Total: total})
 }
@@ -186,8 +202,12 @@ func (h *SecretHandler) create(c *gin.Context) {
 	if req.Type == "" {
 		req.Type = "text"
 	}
-	if !inOptionsSecret(req.Type, "text", "file", "kubeconfig", "ssh-key", "cloud-credential") {
+	if !isValidSecretType(req.Type) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid type"})
+		return
+	}
+	if err := validateSecretValue(req.Type, req.Value); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -215,7 +235,7 @@ func (h *SecretHandler) create(c *gin.Context) {
 	}
 	log.Printf("[secret] created id=%d scope=%s scope_id=%d name=%s by uid=%d",
 		s.ID, s.Scope, s.ScopeID, s.Name, uid)
-	c.JSON(http.StatusCreated, toSecretView(&s))
+	c.JSON(http.StatusCreated, toSecretView(&s, nil))
 }
 
 // GET /secrets/:id (元数据, 不含 value)
@@ -228,7 +248,8 @@ func (h *SecretHandler) get(c *gin.Context) {
 	if !ok {
 		return
 	}
-	c.JSON(http.StatusOK, toSecretView(s))
+	refs := loadSecretReferences(c.Request.Context(), h.db, []int64{id})[id]
+	c.JSON(http.StatusOK, toSecretView(s, refs))
 }
 
 type updateSecretReq struct {
@@ -261,6 +282,10 @@ func (h *SecretHandler) update(c *gin.Context) {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "vault not configured"})
 			return
 		}
+		if err := validateSecretValue(s.Type, *req.Value); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		enc, err := h.vault.Encrypt([]byte(*req.Value))
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "encrypt: " + err.Error()})
@@ -277,7 +302,8 @@ func (h *SecretHandler) update(c *gin.Context) {
 		return
 	}
 	log.Printf("[secret] updated id=%d (value_rotated=%v)", s.ID, req.Value != nil)
-	c.JSON(http.StatusOK, toSecretView(s))
+	refs := loadSecretReferences(c.Request.Context(), h.db, []int64{s.ID})[s.ID]
+	c.JSON(http.StatusOK, toSecretView(s, refs))
 }
 
 // DELETE /secrets/:id (软删)
@@ -286,6 +312,19 @@ func (h *SecretHandler) del(c *gin.Context) {
 	if !ok {
 		return
 	}
+	s, ok := loadSecretOrErr(c, h.db, id)
+	if !ok {
+		return
+	}
+	refs := loadSecretReferences(c.Request.Context(), h.db, []int64{id})[id]
+	if len(refs) > 0 {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":      "secret is referenced by clusters or hosts",
+			"references": refs,
+		})
+		return
+	}
+	_ = s // org 校验已在 loadSecretOrErr 完成
 	res := h.db.WithContext(c.Request.Context()).Delete(&model.Secret{}, id)
 	if res.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": res.Error.Error()})
@@ -384,4 +423,88 @@ func inOptionsSecret(v string, opts ...string) bool {
 		}
 	}
 	return false
+}
+
+func isValidSecretType(typ string) bool {
+	return inOptionsSecret(typ,
+		"text", "file", "kubeconfig", "ssh-key", "cloud-credential",
+		"tencent_cloud", "aliyun_cloud",
+	)
+}
+
+func validateSecretValue(typ, value string) error {
+	switch typ {
+	case "tencent_cloud":
+		var creds struct {
+			SecretID  string `json:"secret_id"`
+			SecretKey string `json:"secret_key"`
+			Region    string `json:"region"`
+		}
+		if err := json.Unmarshal([]byte(value), &creds); err != nil {
+			return fmt.Errorf("tencent_cloud value must be valid JSON")
+		}
+		if strings.TrimSpace(creds.SecretID) == "" ||
+			strings.TrimSpace(creds.SecretKey) == "" ||
+			strings.TrimSpace(creds.Region) == "" {
+			return fmt.Errorf("secret_id, secret_key and region required")
+		}
+	case "aliyun_cloud":
+		var creds struct {
+			AccessKeyID     string `json:"access_key_id"`
+			AccessKeySecret string `json:"access_key_secret"`
+			Region          string `json:"region"`
+		}
+		if err := json.Unmarshal([]byte(value), &creds); err != nil {
+			return fmt.Errorf("aliyun_cloud value must be valid JSON")
+		}
+		if strings.TrimSpace(creds.AccessKeyID) == "" ||
+			strings.TrimSpace(creds.AccessKeySecret) == "" ||
+			strings.TrimSpace(creds.Region) == "" {
+			return fmt.Errorf("access_key_id, access_key_secret and region required")
+		}
+	}
+	return nil
+}
+
+func loadSecretReferences(ctx context.Context, db *gorm.DB, secretIDs []int64) map[int64][]secretRefView {
+	out := make(map[int64][]secretRefView, len(secretIDs))
+	if len(secretIDs) == 0 {
+		return out
+	}
+	for _, id := range secretIDs {
+		out[id] = nil
+	}
+
+	var clusters []model.Cluster
+	_ = db.WithContext(ctx).
+		Select("id", "name", "credential_id").
+		Where("credential_id IN ?", secretIDs).
+		Find(&clusters).Error
+	for i := range clusters {
+		if clusters[i].CredentialID == nil {
+			continue
+		}
+		out[*clusters[i].CredentialID] = append(out[*clusters[i].CredentialID], secretRefView{
+			Kind: "cluster",
+			ID:   clusters[i].ID,
+			Name: clusters[i].Name,
+		})
+	}
+
+	var hosts []model.Host
+	_ = db.WithContext(ctx).
+		Select("id", "name", "credential_id").
+		Where("credential_id IN ?", secretIDs).
+		Find(&hosts).Error
+	for i := range hosts {
+		if hosts[i].CredentialID == nil {
+			continue
+		}
+		out[*hosts[i].CredentialID] = append(out[*hosts[i].CredentialID], secretRefView{
+			Kind: "host",
+			ID:   hosts[i].ID,
+			Name: hosts[i].Name,
+		})
+	}
+	return out
 }
