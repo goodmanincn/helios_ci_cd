@@ -78,3 +78,19 @@ type Runner struct {
 }
 
 func (Runner) TableName() string { return "runners" }
+
+// Deployment 对应 deployments 表 (部署历史)。
+type Deployment struct {
+	ID         int64          `gorm:"primaryKey"                              json:"id"`
+	ClusterID  int64          `gorm:"column:cluster_id;not null;index"        json:"cluster_id"`
+	Namespace  string         `gorm:"column:namespace;size:128;not null"      json:"namespace"`
+	Name       string         `gorm:"column:name;size:128;not null"           json:"name"`
+	Image      string         `gorm:"column:image"                            json:"image,omitempty"`
+	Revision   int64          `gorm:"column:revision"                         json:"revision"`
+	RunID      *int64         `gorm:"column:run_id"                           json:"run_id,omitempty"`
+	Status     string         `gorm:"column:status;size:32;default:'success'" json:"status"`
+	Spec       datatypes.JSON `gorm:"column:spec;type:jsonb;default:'{}'"     json:"spec,omitempty"`
+	CreatedAt  time.Time      `gorm:"column:created_at;not null"              json:"created_at"`
+}
+
+func (Deployment) TableName() string { return "deployments" }

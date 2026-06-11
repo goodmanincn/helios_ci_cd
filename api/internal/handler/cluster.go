@@ -1,4 +1,4 @@
-// Package handler — cluster.go: 集群接入向导与连通性测试 (E4.2)。
+// Package handler — cluster.go: 集群管理 API (E4.2/E4.5/E4.6)。
 package handler
 
 import (
@@ -34,6 +34,9 @@ func (h *ClusterHandler) Register(g *gin.RouterGroup) {
 	g.GET("/clusters/:id", h.get)
 	g.DELETE("/clusters/:id", h.delete)
 	g.POST("/clusters/test", h.test)
+	g.GET("/clusters/:id/workloads", h.workloads)
+	g.GET("/clusters/:id/events", h.events)
+	g.GET("/clusters/:id/deployments/:name/history", h.deploymentHistory)
 }
 
 // ===== GET /clusters =====
@@ -162,7 +165,101 @@ func (h *ClusterHandler) test(c *gin.Context) {
 	c.JSON(http.StatusOK, info)
 }
 
+// ===== GET /clusters/:id/workloads =====
+
+func (h *ClusterHandler) workloads(c *gin.Context) {
+	p, ok := h.resolveProvider(c)
+	if !ok {
+		return
+	}
+	ns := c.Query("ns")
+	if ns == "" {
+		ns = "default"
+	}
+	list, err := p.ListWorkloads(c.Request.Context(), ns)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, list)
+}
+
+// ===== GET /clusters/:id/events =====
+
+func (h *ClusterHandler) events(c *gin.Context) {
+	p, ok := h.resolveProvider(c)
+	if !ok {
+		return
+	}
+	ns := c.Query("ns")
+	limit, _ := strconv.Atoi(c.Query("limit"))
+	if limit <= 0 {
+		limit = 100
+	}
+	list, err := p.GetEvents(c.Request.Context(), ns, limit)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, list)
+}
+
+// ===== GET /clusters/:id/deployments/:name/history =====
+
+func (h *ClusterHandler) deploymentHistory(c *gin.Context) {
+	p, ok := h.resolveProvider(c)
+	if !ok {
+		return
+	}
+	ns := c.Query("ns")
+	if ns == "" {
+		ns = "default"
+	}
+	name := c.Param("name")
+	hist, err := p.GetDeploymentHistory(c.Request.Context(), ns, name)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, hist)
+}
+
 // ---- helpers ----
+
+func (h *ClusterHandler) resolveProvider(c *gin.Context) (cluster.Provider, bool) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return nil, false
+	}
+	cl, err := h.store.Get(id)
+	if err != nil {
+		if err == repository.ErrClusterNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+			return nil, false
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "query failed"})
+		return nil, false
+	}
+	if cl.Provider != "selfhosted" {
+		c.JSON(http.StatusNotImplemented, gin.H{"error": "provider not supported yet"})
+		return nil, false
+	}
+	var cfgMap map[string]string
+	if err := json.Unmarshal(cl.Config, &cfgMap); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid cluster config"})
+		return nil, false
+	}
+	p, err := selfhosted.New(cluster.ClusterConfig{
+		Provider:   cl.Provider,
+		Kubeconfig: []byte(cfgMap["kubeconfig"]),
+	})
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return nil, false
+	}
+	return p, true
+}
 
 func isUniqueViolation(err error) bool {
 	return err != nil && (strings.Contains(err.Error(), "unique") || strings.Contains(err.Error(), "duplicate"))
