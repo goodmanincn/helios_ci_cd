@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import FlowCanvas from "./flow-canvas";
+import StepLibraryPanel from "./step-library-panel";
 
 type TabKey = "canvas" | "yaml" | "triggers" | "variables" | "history";
 
@@ -133,39 +134,18 @@ export default function EditorShell({ pipelineId }: { pipelineId: string }) {
             overflow: "hidden",
           }}
         >
-          {/* 左侧步骤库占位 */}
+          {/* 左侧步骤库 */}
           <aside
             style={{
               borderRight: "1px solid var(--border)",
               padding: 14,
-              overflow: "auto",
+              overflow: "hidden",
               background: "var(--bg-elev)",
+              display: "flex",
+              flexDirection: "column",
             }}
           >
-            <div
-              style={{
-                fontSize: 11,
-                fontWeight: 510,
-                color: "var(--fg-dim)",
-                textTransform: "uppercase",
-                letterSpacing: "0.4px",
-                padding: "0 0 8px",
-              }}
-            >
-              步骤库 (T3.2)
-            </div>
-            <div
-              style={{
-                padding: 8,
-                borderRadius: 5,
-                background: "rgba(255,255,255,0.02)",
-                color: "var(--fg-dim)",
-                fontSize: 12,
-                border: "1px dashed var(--border)",
-              }}
-            >
-              拖拽步骤到画布…
-            </div>
+            <StepLibraryPanel />
           </aside>
 
           {/* 中间画布 */}

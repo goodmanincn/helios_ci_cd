@@ -3,11 +3,13 @@
 import { useCallback } from "react";
 import {
   ReactFlow,
+  ReactFlowProvider,
   Background,
   Controls,
   MiniMap,
   useNodesState,
   useEdgesState,
+  useReactFlow,
   addEdge,
   type Connection,
   type Edge,
@@ -117,13 +119,52 @@ const initialEdges: Edge[] = [
   { id: "e-dp-n", source: "deploy-prod", target: "notify", type: "custom", markerEnd: arrowMarker },
 ];
 
-export default function FlowCanvas() {
+function FlowCanvasInner() {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const { screenToFlowPosition } = useReactFlow();
 
   const onConnect = useCallback(
     (params: Connection) => setEdges((eds) => addEdge({ ...params, type: "custom", markerEnd: arrowMarker }, eds)),
     [setEdges],
+  );
+
+  const onDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  }, []);
+
+  const onDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      const raw = e.dataTransfer.getData("application/helios-step");
+      if (!raw) return;
+      let item: Record<string, unknown>;
+      try {
+        item = JSON.parse(raw);
+      } catch {
+        return;
+      }
+      const position = screenToFlowPosition({
+        x: e.clientX,
+        y: e.clientY,
+      });
+      const id = `${String(item.id ?? "step")}-${Date.now()}`;
+      const newNode: Node = {
+        id,
+        type: String(item.nodeType ?? "step"),
+        position,
+        data: {
+          label: String(item.name ?? "未命名"),
+          icon: String(item.icon ?? "⚙"),
+          ...(typeof item.defaultConfig === "object" && item.defaultConfig != null
+            ? (item.defaultConfig as Record<string, unknown>)
+            : {}),
+        },
+      };
+      setNodes((nds) => [...nds, newNode]);
+    },
+    [screenToFlowPosition, setNodes],
   );
 
   return (
@@ -133,6 +174,8 @@ export default function FlowCanvas() {
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       onConnect={onConnect}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       fitView
@@ -150,5 +193,13 @@ export default function FlowCanvas() {
         style={{ background: "var(--bg-elev)", border: "1px solid var(--border)" }}
       />
     </ReactFlow>
+  );
+}
+
+export default function FlowCanvas() {
+  return (
+    <ReactFlowProvider>
+      <FlowCanvasInner />
+    </ReactFlowProvider>
   );
 }
