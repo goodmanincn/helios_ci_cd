@@ -52,9 +52,50 @@ export async function getCluster(token: string | null, id: number | string) {
   return apiFetch<Cluster>(`/api/v1/clusters/${id}`, { token });
 }
 
+export interface CloudClusterSummary {
+  id: string;
+  name: string;
+  version?: string;
+  status?: string;
+}
+
+export interface TkeCloudCreds {
+  secret_id: string;
+  secret_key: string;
+  region: string;
+  role_arn?: string;
+  cluster_id?: string;
+}
+
+export interface AckCloudCreds {
+  access_key_id: string;
+  access_key_secret: string;
+  region: string;
+  role_arn?: string;
+  cluster_id?: string;
+}
+
+export async function discoverClusters(
+  token: string | null,
+  provider: "tke" | "ack",
+  cloud: TkeCloudCreds | AckCloudCreds,
+) {
+  return apiFetch<{ clusters: CloudClusterSummary[] }>("/api/v1/clusters/discover", {
+    token,
+    method: "POST",
+    body: JSON.stringify({ provider, cloud }),
+  });
+}
+
 export async function createCluster(
   token: string | null,
-  body: { name: string; provider: string; region?: string; kubeconfig?: string },
+  body: {
+    name: string;
+    provider: string;
+    region?: string;
+    kubeconfig?: string;
+    cloud?: TkeCloudCreds | AckCloudCreds;
+  },
 ) {
   return apiFetch<Cluster>("/api/v1/clusters", {
     token,
@@ -65,7 +106,11 @@ export async function createCluster(
 
 export async function testCluster(
   token: string | null,
-  body: { provider: string; kubeconfig: string },
+  body: {
+    provider: string;
+    kubeconfig?: string;
+    cloud?: TkeCloudCreds | AckCloudCreds;
+  },
 ) {
   return apiFetch<HealthInfo>("/api/v1/clusters/test", {
     token,

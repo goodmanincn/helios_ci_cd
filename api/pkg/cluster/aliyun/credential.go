@@ -44,7 +44,15 @@ func NewCredentialManager(accessKeyID, accessKeySecret, roleARN, region string) 
 }
 
 // Get 获取有效凭据(缓存命中直接返,否则刷新)。
+// roleARN 为空时直接使用永久 AK/SK。
 func (m *CredentialManager) Get() (*Credential, error) {
+	if m.roleARN == "" {
+		return &Credential{
+			AccessKeyID:     m.accessKeyID,
+			AccessKeySecret: m.accessKeySecret,
+			ExpiredAt:       time.Now().Add(24 * time.Hour),
+		}, nil
+	}
 	m.mu.RLock()
 	c := m.cred
 	m.mu.RUnlock()

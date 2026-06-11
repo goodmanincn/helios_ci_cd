@@ -3,6 +3,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -36,6 +37,7 @@ func (h *ClusterHandler) Register(g *gin.RouterGroup) {
 	g.GET("/clusters/:id", h.get)
 	g.DELETE("/clusters/:id", h.delete)
 	g.POST("/clusters/test", h.test)
+	g.POST("/clusters/discover", h.discover)
 	g.GET("/clusters/:id/workloads", h.workloads)
 	g.GET("/clusters/:id/events", h.events)
 	g.GET("/clusters/:id/deployments/:name/history", h.deploymentHistory)
@@ -60,10 +62,11 @@ func (h *ClusterHandler) list(c *gin.Context) {
 // ===== POST /clusters =====
 
 type createClusterReq struct {
-	Name       string `json:"name" binding:"required"`
-	Provider   string `json:"provider" binding:"required"`
-	Region     string `json:"region"`
-	Kubeconfig string `json:"kubeconfig"` // selfhosted 必填
+	Name       string          `json:"name" binding:"required"`
+	Provider   string          `json:"provider" binding:"required"`
+	Region     string          `json:"region"`
+	Kubeconfig string          `json:"kubeconfig"` // selfhosted
+	Cloud      json.RawMessage `json:"cloud"`      // tke/ack 凭据 JSON
 }
 
 func (h *ClusterHandler) create(c *gin.Context) {
@@ -72,8 +75,9 @@ func (h *ClusterHandler) create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if req.Provider == "selfhosted" && req.Kubeconfig == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "kubeconfig is required for selfhosted"})
+	configBytes, err := h.buildClusterConfig(req.Provider, req.Kubeconfig, req.Cloud)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -81,8 +85,6 @@ func (h *ClusterHandler) create(c *gin.Context) {
 	if !ok {
 		return
 	}
-	configMap := map[string]string{"kubeconfig": req.Kubeconfig}
-	configBytes, _ := json.Marshal(configMap)
 	cl := &model.Cluster{
 		OrgID:    orgID,
 		Name:     req.Name,
@@ -140,8 +142,9 @@ func (h *ClusterHandler) delete(c *gin.Context) {
 // ===== POST /clusters/test =====
 
 type testClusterReq struct {
-	Provider   string `json:"provider" binding:"required"`
-	Kubeconfig string `json:"kubeconfig" binding:"required"`
+	Provider   string          `json:"provider" binding:"required"`
+	Kubeconfig string          `json:"kubeconfig"`
+	Cloud      json.RawMessage `json:"cloud"`
 }
 
 func (h *ClusterHandler) test(c *gin.Context) {
@@ -150,22 +153,64 @@ func (h *ClusterHandler) test(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
-	p, err := selfhosted.New(cluster.ClusterConfig{
-		Provider:   req.Provider,
-		Kubeconfig: []byte(req.Kubeconfig),
-	})
+	cfgBytes, err := h.buildClusterConfig(req.Provider, req.Kubeconfig, req.Cloud)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
+	p, err := h.providerFromConfig(req.Provider, cfgBytes)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	info, err := p.HealthCheck(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, info)
+}
+
+type discoverClusterReq struct {
+	Provider string          `json:"provider" binding:"required"`
+	Cloud    json.RawMessage `json:"cloud" binding:"required"`
+}
+
+func (h *ClusterHandler) discover(c *gin.Context) {
+	var req discoverClusterReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	ctx := c.Request.Context()
+	switch req.Provider {
+	case "tke":
+		var creds tencent.CloudCredentials
+		if err := json.Unmarshal(req.Cloud, &creds); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid cloud credentials"})
+			return
+		}
+		list, err := tencent.ListClusters(ctx, creds)
+		if err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"clusters": list})
+	case "ack":
+		var creds aliyun.CloudCredentials
+		if err := json.Unmarshal(req.Cloud, &creds); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid cloud credentials"})
+			return
+		}
+		list, err := aliyun.ListClusters(ctx, creds)
+		if err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"clusters": list})
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "discover only supports tke or ack"})
+	}
 }
 
 // ===== GET /clusters/:id/workloads =====
@@ -253,6 +298,42 @@ func (h *ClusterHandler) rollback(c *gin.Context) {
 
 // ---- helpers ----
 
+func (h *ClusterHandler) buildClusterConfig(provider, kubeconfig string, cloud json.RawMessage) ([]byte, error) {
+	switch provider {
+	case "selfhosted":
+		if kubeconfig == "" {
+			return nil, fmt.Errorf("kubeconfig is required for selfhosted")
+		}
+		return json.Marshal(map[string]string{"kubeconfig": kubeconfig})
+	case "tke", "ack":
+		if len(cloud) == 0 {
+			return nil, fmt.Errorf("cloud credentials required for %s", provider)
+		}
+		// 存到 config.kubeconfig 字段 (历史命名; 内容是 cloud JSON)
+		return json.Marshal(map[string]string{"kubeconfig": string(cloud)})
+	default:
+		return nil, fmt.Errorf("unsupported provider %q", provider)
+	}
+}
+
+func (h *ClusterHandler) providerFromConfig(provider string, configBytes []byte) (cluster.Provider, error) {
+	var cfgMap map[string]string
+	if err := json.Unmarshal(configBytes, &cfgMap); err != nil {
+		return nil, err
+	}
+	raw := []byte(cfgMap["kubeconfig"])
+	switch provider {
+	case "selfhosted":
+		return selfhosted.New(cluster.ClusterConfig{Provider: provider, Kubeconfig: raw})
+	case "tke":
+		return tencent.New(cluster.ClusterConfig{Provider: provider, Kubeconfig: raw})
+	case "ack":
+		return aliyun.New(cluster.ClusterConfig{Provider: provider, Kubeconfig: raw})
+	default:
+		return nil, fmt.Errorf("unsupported provider %q", provider)
+	}
+}
+
 func (h *ClusterHandler) resolveProvider(c *gin.Context) (cluster.Provider, bool) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -274,28 +355,7 @@ func (h *ClusterHandler) resolveProvider(c *gin.Context) (cluster.Provider, bool
 		return nil, false
 	}
 
-	var p cluster.Provider
-	var pErr error
-	switch cl.Provider {
-	case "selfhosted":
-		p, pErr = selfhosted.New(cluster.ClusterConfig{
-			Provider:   cl.Provider,
-			Kubeconfig: []byte(cfgMap["kubeconfig"]),
-		})
-	case "tke":
-		p, pErr = tencent.New(cluster.ClusterConfig{
-			Provider:   cl.Provider,
-			Kubeconfig: []byte(cfgMap["kubeconfig"]),
-		})
-	case "ack":
-		p, pErr = aliyun.New(cluster.ClusterConfig{
-			Provider:   cl.Provider,
-			Kubeconfig: []byte(cfgMap["kubeconfig"]),
-		})
-	default:
-		c.JSON(http.StatusNotImplemented, gin.H{"error": "provider not supported yet"})
-		return nil, false
-	}
+	p, pErr := h.providerFromConfig(cl.Provider, cl.Config)
 	if pErr != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": pErr.Error()})
 		return nil, false
