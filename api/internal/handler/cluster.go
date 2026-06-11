@@ -37,6 +37,7 @@ func (h *ClusterHandler) Register(g *gin.RouterGroup) {
 	g.GET("/clusters/:id/workloads", h.workloads)
 	g.GET("/clusters/:id/events", h.events)
 	g.GET("/clusters/:id/deployments/:name/history", h.deploymentHistory)
+	g.POST("/clusters/:id/deployments/:name/rollback", h.rollback)
 }
 
 // ===== GET /clusters =====
@@ -222,6 +223,30 @@ func (h *ClusterHandler) deploymentHistory(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, hist)
+}
+
+// ===== POST /clusters/:id/deployments/:name/rollback =====
+
+func (h *ClusterHandler) rollback(c *gin.Context) {
+	p, ok := h.resolveProvider(c)
+	if !ok {
+		return
+	}
+	ns := c.Query("ns")
+	if ns == "" {
+		ns = "default"
+	}
+	name := c.Param("name")
+	toRevision, _ := strconv.ParseInt(c.Query("to"), 10, 64)
+	if toRevision <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "to revision required"})
+		return
+	}
+	if err := p.Rollback(c.Request.Context(), ns, name, toRevision); err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "rollback initiated"})
 }
 
 // ---- helpers ----

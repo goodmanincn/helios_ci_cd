@@ -125,11 +125,47 @@ func (p *Provider) Rollback(ctx context.Context, namespace, deployment string, t
 	if err := p.Connect(ctx); err != nil {
 		return err
 	}
-	// 通过 Patch deployment 的 rollbackTo 字段触发回滚 (旧版 API)。
-	// 现代 K8s 推荐用 ReplicaSet 管理 revision,这里简单实现:
-	// 读取对应 revision 的 ReplicaSet,把其 PodTemplate 同步到 Deployment。
-	// TODO: 完整实现需读 ReplicaSet annotations (T4.5)。
-	return cluster.NewError(cluster.KindDeployError, "rollback not fully implemented", nil)
+
+	// 1. 找到目标 revision 的 ReplicaSet
+	list, err := p.clientset.AppsV1().ReplicaSets(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return cluster.NewError(cluster.KindConnectError, "list replicasets", err)
+	}
+	var target *appsv1.ReplicaSet
+	for i := range list.Items {
+		rs := &list.Items[i]
+		// 只取属于该 Deployment 的 ReplicaSet (ownerReferences)
+		belongs := false
+		for _, owner := range rs.OwnerReferences {
+			if owner.Kind == "Deployment" && owner.Name == deployment {
+				belongs = true
+				break
+			}
+		}
+		if !belongs {
+			continue
+		}
+		rev := rs.Annotations["deployment.kubernetes.io/revision"]
+		if parseInt64(rev) == toRevision {
+			target = rs
+			break
+		}
+	}
+	if target == nil {
+		return cluster.NewError(cluster.KindNotFound, fmt.Sprintf("revision %d not found", toRevision), nil)
+	}
+
+	// 2. Patch Deployment 的 spec.template 为目标 ReplicaSet 的 PodTemplate
+	dep, err := p.clientset.AppsV1().Deployments(namespace).Get(ctx, deployment, metav1.GetOptions{})
+	if err != nil {
+		return cluster.NewError(cluster.KindConnectError, "get deployment", err)
+	}
+	dep.Spec.Template = target.Spec.Template
+	_, err = p.clientset.AppsV1().Deployments(namespace).Update(ctx, dep, metav1.UpdateOptions{})
+	if err != nil {
+		return cluster.NewError(cluster.KindDeployError, "update deployment", err)
+	}
+	return nil
 }
 
 // GetDeploymentHistory 返回 Deployment 的 revision 历史。
