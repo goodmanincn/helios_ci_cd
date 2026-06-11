@@ -15,6 +15,28 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
+import StepNode from "./nodes/step-node";
+import MatrixNode from "./nodes/matrix-node";
+import ApprovalNode from "./nodes/approval-node";
+import NotifyNode from "./nodes/notify-node";
+import CustomEdge from "./edges/custom-edge";
+
+const nodeTypes = {
+  step: StepNode,
+  matrix: MatrixNode,
+  approval: ApprovalNode,
+  notify: NotifyNode,
+};
+
+const edgeTypes = {
+  custom: CustomEdge,
+};
+
+const arrowMarker = {
+  type: "arrowclosed" as const,
+  color: "#5e6ad2",
+};
+
 const initialNodes: Node[] = [
   {
     id: "checkout",
@@ -23,84 +45,84 @@ const initialNodes: Node[] = [
     type: "step",
   },
   {
-    id: "test",
-    position: { x: 250, y: 150 },
-    data: { label: "单元测试", icon: "🧪", sub: "go test" },
-    type: "step",
+    id: "test-0",
+    position: { x: 80, y: 140 },
+    data: { label: "🧪 go 1.21" },
+    type: "matrix",
+  },
+  {
+    id: "test-1",
+    position: { x: 210, y: 140 },
+    data: { label: "🧪 go 1.22" },
+    type: "matrix",
+  },
+  {
+    id: "test-2",
+    position: { x: 340, y: 140 },
+    data: { label: "🧪 go 1.23" },
+    type: "matrix",
   },
   {
     id: "build",
-    position: { x: 250, y: 280 },
+    position: { x: 250, y: 260 },
     data: { label: "构建镜像", icon: "📦", sub: "kaniko" },
     type: "step",
+  },
+  {
+    id: "scan",
+    position: { x: 250, y: 380 },
+    data: { label: "安全扫描", icon: "🛡", sub: "trivy · CRITICAL" },
+    type: "step",
+  },
+  {
+    id: "deploy-staging",
+    position: { x: 250, y: 500 },
+    data: { label: "部署 Staging", icon: "☸", sub: "staging-tke" },
+    type: "step",
+  },
+  {
+    id: "approval",
+    position: { x: 250, y: 620 },
+    data: { label: "人工审批", approvers: "alice, bob" },
+    type: "approval",
+  },
+  {
+    id: "deploy-prod",
+    position: { x: 250, y: 740 },
+    data: { label: "部署 生产", icon: "🚀", sub: "aliyun-ack · Canary" },
+    type: "step",
+  },
+  {
+    id: "notify",
+    position: { x: 250, y: 860 },
+    data: { label: "通知团队", icon: "📢", sub: "钉钉" },
+    type: "notify",
   },
 ];
 
 const initialEdges: Edge[] = [
-  { id: "e-checkout-test", source: "checkout", target: "test", type: "custom" },
-  { id: "e-test-build", source: "test", target: "build", type: "custom" },
+  // checkout → 3 matrix tests (fork)
+  { id: "e-c-t0", source: "checkout", target: "test-0", type: "custom", markerEnd: arrowMarker },
+  { id: "e-c-t1", source: "checkout", target: "test-1", type: "custom", markerEnd: arrowMarker },
+  { id: "e-c-t2", source: "checkout", target: "test-2", type: "custom", markerEnd: arrowMarker },
+  // 3 matrix tests → build (join)
+  { id: "e-t0-b", source: "test-0", target: "build", type: "custom", markerEnd: arrowMarker },
+  { id: "e-t1-b", source: "test-1", target: "build", type: "custom", markerEnd: arrowMarker },
+  { id: "e-t2-b", source: "test-2", target: "build", type: "custom", markerEnd: arrowMarker },
+  // main spine
+  { id: "e-b-s", source: "build", target: "scan", type: "custom", markerEnd: arrowMarker },
+  { id: "e-s-ds", source: "scan", target: "deploy-staging", type: "custom", markerEnd: arrowMarker },
+  { id: "e-ds-a", source: "deploy-staging", target: "approval", type: "custom", markerEnd: arrowMarker },
+  { id: "e-a-dp", source: "approval", target: "deploy-prod", type: "custom", markerEnd: arrowMarker },
+  { id: "e-dp-n", source: "deploy-prod", target: "notify", type: "custom", markerEnd: arrowMarker },
 ];
-
-function StepNode({ data }: { data: Record<string, unknown> }) {
-  return (
-    <div
-      style={{
-        background: "var(--bg-elev)",
-        border: "1px solid var(--border)",
-        borderRadius: 8,
-        padding: "10px 12px",
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        cursor: "move",
-        boxShadow: "0 2px 4px rgba(0,0,0,0.4)",
-        minWidth: 180,
-      }}
-    >
-      <div
-        style={{
-          width: 28,
-          height: 28,
-          background: "rgba(255,255,255,0.05)",
-          borderRadius: 5,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: 14,
-          flexShrink: 0,
-        }}
-      >
-        {String(data.icon ?? "⚙")}
-      </div>
-      <div>
-        <div style={{ fontSize: 13, fontWeight: 590, color: "var(--fg)" }}>
-          {String(data.label ?? "")}
-        </div>
-        {data.sub != null && (
-          <div
-            style={{
-              fontSize: 10,
-              color: "var(--fg-dim)",
-              fontFamily: "var(--font-mono), monospace",
-              marginTop: 1,
-            }}
-          >
-            {String(data.sub)}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-const nodeTypes = { step: StepNode };
 
 export default function FlowCanvas() {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
 
   const onConnect = useCallback(
-    (params: Connection) => setEdges((eds) => addEdge(params, eds)),
+    (params: Connection) => setEdges((eds) => addEdge({ ...params, type: "custom", markerEnd: arrowMarker }, eds)),
     [setEdges],
   );
 
@@ -112,6 +134,7 @@ export default function FlowCanvas() {
       onEdgesChange={onEdgesChange}
       onConnect={onConnect}
       nodeTypes={nodeTypes}
+      edgeTypes={edgeTypes}
       fitView
       style={{ background: "var(--bg)" }}
     >
