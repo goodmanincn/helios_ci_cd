@@ -1,0 +1,16 @@
+apiVersion: v2
+name: helios
+description: Helios CI/CD Platform
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - ci
+  - cd
+  - continuous-integration
+  - continuous-delivery
+home: https://github.com/helios-cicd/helios
+sources:
+  - https://github.com/helios-cicd/helios
+maintainers:
+  - name: Helios Team

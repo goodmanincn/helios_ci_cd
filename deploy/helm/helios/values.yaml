@@ -1,0 +1,130 @@
+# Default values for Helios.
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/helios-cicd/helios
+  pullPolicy: IfNotPresent
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext: {}
+
+securityContext: {}
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: helios.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources: {}
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 100
+  targetCPUUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# Database configuration
+postgresql:
+  enabled: true
+  auth:
+    database: helios
+    username: helios
+    password: ""
+  primary:
+    persistence:
+      enabled: true
+      size: 10Gi
+
+# Redis configuration
+redis:
+  enabled: true
+  auth:
+    password: ""
+  master:
+    persistence:
+      enabled: true
+      size: 5Gi
+
+# Object storage (MinIO)
+minio:
+  enabled: true
+  auth:
+    rootUser: admin
+    rootPassword: ""
+  persistence:
+    enabled: true
+    size: 10Gi
+
+# Application configuration
+config:
+  # Logging
+  logLevel: info
+  logFormat: json
+
+  # Storage
+  storage:
+    type: minio
+    endpoint: ""
+    accessKey: ""
+    secretKey: ""
+    bucket: helios
+    secure: false
+
+  # Database
+  database:
+    host: ""
+    port: 5432
+    name: helios
+    user: helios
+    password: ""
+    sslMode: disable
+
+  # Redis
+  redis:
+    host: ""
+    port: 6379
+    password: ""
+    db: 0
+
+  # JWT
+  jwt:
+    issuer: helios
+    accessTTL: 30m
+    refreshTTL: 168h
+    privateKeyPath: ""
+    publicKeyPath: ""
+
+  # Build runner
+  runner:
+    runtime: kubernetes
+    namespace: default
