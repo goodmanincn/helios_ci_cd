@@ -30,7 +30,7 @@ const NAV_GROUPS: NavGroup[] = [
     title: "工作区",
     items: [
       { href: "/projects", label: "项目", icon: "📦", enabled: true, badgeKey: "projects" },
-      { href: "/pipelines", label: "流水线", icon: "🔀", enabled: false },
+      { href: "/pipelines", label: "流水线", icon: "🔀", enabled: true },
       { href: "/runs", label: "执行记录", icon: "▶", enabled: true, badgeKey: "runs" },
       { href: "/dashboard", label: "仪表盘", icon: "◐", enabled: true },
     ],

@@ -60,6 +60,24 @@ export default function PropertyPanel() {
   const timeout = data.timeout != null ? String(data.timeout) : "";
   const approvers = data.approvers != null ? String(data.approvers) : "";
 
+  // with 对象编辑
+  const withObj =
+    data.with != null && typeof data.with === "object"
+      ? (data.with as Record<string, unknown>)
+      : null;
+
+  // matrix 对象只读展示
+  const matrixObj =
+    data.matrix != null && typeof data.matrix === "object"
+      ? (data.matrix as Record<string, unknown>)
+      : null;
+
+  const nodeId = node.id;
+  function updateWith(key: string, value: string) {
+    const next = { ...(withObj ?? {}), [key]: value };
+    updateNodeData(nodeId, { with: next });
+  }
+
   return (
     <div>
       <div
@@ -118,16 +136,77 @@ export default function PropertyPanel() {
       </Field>
 
       {node.type === "approval" && (
-        <Field label="审批人">
-          <input
-            type="text"
-            className="input"
-            style={{ fontSize: 12, padding: "6px 10px" }}
-            value={approvers}
-            onChange={(e) =>
-              updateNodeData(node.id, { approvers: e.target.value })
-            }
-          />
+        <>
+          <Field label="审批人">
+            <input
+              type="text"
+              className="input"
+              style={{ fontSize: 12, padding: "6px 10px" }}
+              value={approvers}
+              onChange={(e) =>
+                updateNodeData(node.id, { approvers: e.target.value })
+              }
+            />
+          </Field>
+          <Field label="模式">
+            <select
+              className="input"
+              style={{ fontSize: 12, padding: "6px 10px" }}
+              value={String(data.mode ?? "any")}
+              onChange={(e) => updateNodeData(node.id, { mode: e.target.value })}
+            >
+              <option value="any">any (任一通过)</option>
+              <option value="all">all (全员通过)</option>
+            </select>
+          </Field>
+        </>
+      )}
+
+      {withObj && (
+        <>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 510,
+              color: "var(--fg-dim)",
+              textTransform: "uppercase",
+              letterSpacing: "0.4px",
+              padding: "10px 0 6px",
+            }}
+          >
+            专属配置
+          </div>
+          {Object.entries(withObj).map(([k, v]) => (
+            <Field key={k} label={k}>
+              <input
+                type="text"
+                className="input mono"
+                style={{ fontSize: 12, padding: "6px 10px" }}
+                value={typeof v === "string" ? v : JSON.stringify(v)}
+                onChange={(e) => updateWith(k, e.target.value)}
+              />
+            </Field>
+          ))}
+        </>
+      )}
+
+      {matrixObj && (
+        <Field label="Matrix">
+          <pre
+            className="mono"
+            style={{
+              background: "rgba(255,255,255,0.02)",
+              border: "1px solid var(--border)",
+              borderRadius: 5,
+              padding: 8,
+              fontSize: 11,
+              lineHeight: 1.6,
+              color: "var(--fg-dim)",
+              whiteSpace: "pre-wrap",
+            }}
+          >
+            {JSON.stringify(matrixObj, null, 2)}
+          </pre>
         </Field>
       )}
 
