@@ -1,14 +1,12 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import {
   ReactFlow,
   ReactFlowProvider,
   Background,
   Controls,
   MiniMap,
-  useNodesState,
-  useEdgesState,
   useReactFlow,
   addEdge,
   type Connection,
@@ -22,6 +20,7 @@ import MatrixNode from "./nodes/matrix-node";
 import ApprovalNode from "./nodes/approval-node";
 import NotifyNode from "./nodes/notify-node";
 import CustomEdge from "./edges/custom-edge";
+import { useEditorStore } from "./editor-store";
 
 const nodeTypes = {
   step: StepNode,
@@ -103,15 +102,12 @@ const initialNodes: Node[] = [
 ];
 
 const initialEdges: Edge[] = [
-  // checkout → 3 matrix tests (fork)
   { id: "e-c-t0", source: "checkout", target: "test-0", type: "custom", markerEnd: arrowMarker },
   { id: "e-c-t1", source: "checkout", target: "test-1", type: "custom", markerEnd: arrowMarker },
   { id: "e-c-t2", source: "checkout", target: "test-2", type: "custom", markerEnd: arrowMarker },
-  // 3 matrix tests → build (join)
   { id: "e-t0-b", source: "test-0", target: "build", type: "custom", markerEnd: arrowMarker },
   { id: "e-t1-b", source: "test-1", target: "build", type: "custom", markerEnd: arrowMarker },
   { id: "e-t2-b", source: "test-2", target: "build", type: "custom", markerEnd: arrowMarker },
-  // main spine
   { id: "e-b-s", source: "build", target: "scan", type: "custom", markerEnd: arrowMarker },
   { id: "e-s-ds", source: "scan", target: "deploy-staging", type: "custom", markerEnd: arrowMarker },
   { id: "e-ds-a", source: "deploy-staging", target: "approval", type: "custom", markerEnd: arrowMarker },
@@ -120,9 +116,18 @@ const initialEdges: Edge[] = [
 ];
 
 function FlowCanvasInner() {
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const nodes = useEditorStore((s) => s.nodes);
+  const edges = useEditorStore((s) => s.edges);
+  const onNodesChange = useEditorStore((s) => s.onNodesChange);
+  const onEdgesChange = useEditorStore((s) => s.onEdgesChange);
+  const setEdges = useEditorStore((s) => s.setEdges);
+  const setNodes = useEditorStore((s) => s.setNodes);
   const { screenToFlowPosition } = useReactFlow();
+
+  useEffect(() => {
+    setNodes(initialNodes);
+    setEdges(initialEdges);
+  }, [setNodes, setEdges]);
 
   const onConnect = useCallback(
     (params: Connection) => setEdges((eds) => addEdge({ ...params, type: "custom", markerEnd: arrowMarker }, eds)),

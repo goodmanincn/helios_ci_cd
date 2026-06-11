@@ -3,6 +3,7 @@
 import { useState } from "react";
 import FlowCanvas from "./flow-canvas";
 import StepLibraryPanel from "./step-library-panel";
+import PropertyPanel from "./property-panel";
 
 type TabKey = "canvas" | "yaml" | "triggers" | "variables" | "history";
 
@@ -153,7 +154,7 @@ export default function EditorShell({ pipelineId }: { pipelineId: string }) {
             <FlowCanvas />
           </div>
 
-          {/* 右侧属性面板占位 */}
+          {/* 右侧属性面板 */}
           <aside
             style={{
               borderLeft: "1px solid var(--border)",
@@ -162,30 +163,7 @@ export default function EditorShell({ pipelineId }: { pipelineId: string }) {
               background: "var(--bg-elev)",
             }}
           >
-            <div
-              style={{
-                fontSize: 11,
-                fontWeight: 510,
-                color: "var(--fg-dim)",
-                textTransform: "uppercase",
-                letterSpacing: "0.4px",
-                padding: "0 0 8px",
-              }}
-            >
-              属性面板 (T3.3)
-            </div>
-            <div
-              style={{
-                padding: 8,
-                borderRadius: 5,
-                background: "rgba(255,255,255,0.02)",
-                color: "var(--fg-dim)",
-                fontSize: 12,
-                border: "1px dashed var(--border)",
-              }}
-            >
-              选中节点后显示表单…
-            </div>
+            <PropertyPanel />
           </aside>
         </div>
       )}
