@@ -45,9 +45,9 @@ type Host struct {
 
 func (Host) TableName() string { return "hosts" }
 
-// HostGroup 对应 host_groups 表
+// HostGroup 对应 host_groups 表 (DDL 无 deleted_at, 用 BaseNoSoftDelete)
 type HostGroup struct {
-	Base
+	BaseNoSoftDelete
 	OrgID int64          `gorm:"column:org_id;not null;index"                                       json:"org_id"`
 	Name  string         `gorm:"column:name;size:128;not null;uniqueIndex:uq_hgroups_org_name,priority:2" json:"name"`
 	Vars  datatypes.JSON `gorm:"column:vars;type:jsonb;default:'{}'"                                json:"vars,omitempty"`

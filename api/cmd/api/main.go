@@ -173,6 +173,7 @@ func main() {
 	handler.NewApprovalHandler(approvalSvc).Register(protected)
 	handler.NewClusterHandler(gdb).Register(protected)
 	handler.NewHostHandler(gdb).Register(protected)
+	handler.NewHostGroupHandler(gdb).Register(protected)
 
 	addr := os.Getenv("HELIOS_API_ADDR")
 	if addr == "" {

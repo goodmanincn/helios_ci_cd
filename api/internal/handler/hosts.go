@@ -3,6 +3,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -21,12 +22,17 @@ import (
 
 // HostHandler 主机管理 API。
 type HostHandler struct {
-	db    *gorm.DB
-	store repository.HostStore
+	db     *gorm.DB
+	store  repository.HostStore
+	groups repository.HostGroupStore
 }
 
 func NewHostHandler(db *gorm.DB) *HostHandler {
-	return &HostHandler{db: db, store: repository.NewHostRepository(db)}
+	return &HostHandler{
+		db:     db,
+		store:  repository.NewHostRepository(db),
+		groups: repository.NewHostGroupRepository(db),
+	}
 }
 
 // Register 挂到受保护 /api/v1。
@@ -48,15 +54,32 @@ func (h *HostHandler) list(c *gin.Context) {
 	}
 	q := c.Query("q")
 	label := c.Query("label")
+	group := c.Query("group") // 按组名过滤 (T6.1.3)
 
-	list, err := h.store.ListByOrg(orgID)
+	// 按组查走 join 路径; 没指定组则按 org 拉全量再内存过滤
+	var list []model.Host
+	var err error
+	if group != "" {
+		g, gerr := h.groups.GetByName(orgID, group)
+		if gerr != nil {
+			if errors.Is(gerr, repository.ErrHostGroupNotFound) {
+				c.JSON(http.StatusOK, []model.Host{})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "group lookup failed"})
+			return
+		}
+		list, err = h.groups.ListMembers(g.ID)
+	} else {
+		list, err = h.store.ListByOrg(orgID)
+	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "query failed"})
 		return
 	}
 
 	// 内存过滤 q + label
-	var out []model.Host
+	out := make([]model.Host, 0, len(list))
 	for _, h := range list {
 		if q != "" && !strings.Contains(h.Name, q) && !strings.Contains(h.IP, q) {
 			continue
