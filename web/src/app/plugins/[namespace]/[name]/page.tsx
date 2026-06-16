@@ -3,8 +3,9 @@
 // 插件详情页 (M9). /plugins/<namespace>/<name>
 // 显示 README + inputs/outputs 表格 + 版本下拉 + 安装/卸载.
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { marked } from "marked";
 import { AppShell } from "@/components/app-shell";
 import { useAuthStore } from "@/lib/auth-store";
 import {
@@ -299,25 +300,10 @@ export default function PluginDetailPage() {
           </Section>
         )}
 
-        {/* README */}
+        {/* README (markdown 渲染) */}
         {selVer?.readme && (
           <Section title="README">
-            <pre
-              style={{
-                margin: 0,
-                padding: 16,
-                background: "var(--surface)",
-                border: "1px solid var(--border)",
-                borderRadius: 6,
-                fontSize: 12,
-                color: "var(--fg-mute)",
-                whiteSpace: "pre-wrap",
-                fontFamily: "var(--font-mono)",
-                lineHeight: 1.6,
-              }}
-            >
-              {selVer.readme}
-            </pre>
+            <ReadmeMarkdown raw={selVer.readme} />
           </Section>
         )}
 
@@ -389,5 +375,29 @@ function SimpleTable({ cols, rows }: { cols: string[]; rows: Record<string, stri
         </tbody>
       </table>
     </div>
+  );
+}
+
+// ReadmeMarkdown — 把 markdown 文本用 marked 渲染为 HTML, dark theme 适配.
+function ReadmeMarkdown({ raw }: { raw: string }) {
+  const html = useMemo(() => {
+    const result = marked.parse(raw, { async: false });
+    return typeof result === "string" ? result : "";
+  }, [raw]);
+
+  return (
+    <div
+      className="readme-md"
+      dangerouslySetInnerHTML={{ __html: html }}
+      style={{
+        padding: 20,
+        background: "var(--surface)",
+        border: "1px solid var(--border)",
+        borderRadius: 6,
+        fontSize: 14,
+        color: "var(--fg-mute)",
+        lineHeight: 1.7,
+      }}
+    />
   );
 }
