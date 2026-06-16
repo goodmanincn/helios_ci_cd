@@ -58,6 +58,7 @@ func New() *cobra.Command {
 		newSecretsCmd(),
 		newClustersCmd(),
 		newHostsCmd(),
+		newPluginsCmd(),
 	)
 	return root
 }
