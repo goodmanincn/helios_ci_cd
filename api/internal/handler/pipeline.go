@@ -11,8 +11,10 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/datatypes"
@@ -20,14 +22,28 @@ import (
 
 	"github.com/helios-cicd/helios/api/internal/model"
 	"github.com/helios-cicd/helios/api/pkg/dsl"
+	"github.com/helios-cicd/helios/api/pkg/queue"
+	"github.com/helios-cicd/helios/api/pkg/tasks"
 )
 
 // PipelineHandler 流水线 DSL/version API。
 type PipelineHandler struct {
-	db *gorm.DB
+	db  *gorm.DB
+	enq queue.Enqueuer // 可选, trigger 时必传
 }
 
 func NewPipelineHandler(db *gorm.DB) *PipelineHandler { return &PipelineHandler{db: db} }
+
+// WithQueue 注入任务队列 (用于 trigger). 链式返回.
+func (h *PipelineHandler) WithQueue(enq queue.Enqueuer) *PipelineHandler {
+	h.enq = enq
+	return h
+}
+
+// WithEnqueuer alias of WithQueue, 兼容已有测试.
+func (h *PipelineHandler) WithEnqueuer(enq queue.Enqueuer) *PipelineHandler {
+	return h.WithQueue(enq)
+}
 
 // Register 挂到受保护 /api/v1。
 func (h *PipelineHandler) Register(g *gin.RouterGroup) {
@@ -37,6 +53,7 @@ func (h *PipelineHandler) Register(g *gin.RouterGroup) {
 	g.PUT("/pipelines/:id/spec", h.updateSpec)
 	g.GET("/pipelines/:id/versions", h.listVersions)
 	g.POST("/pipelines/:id/versions/:v/restore", h.restoreVersion)
+	g.POST("/pipelines/:id/trigger", h.trigger)
 }
 
 // ===== GET /pipelines =====
@@ -406,4 +423,105 @@ func (h *PipelineHandler) restoreVersion(c *gin.Context) {
 func mustJSON(v any) []byte {
 	b, _ := json.Marshal(v)
 	return b
+}
+
+// ===== POST /pipelines/:id/trigger =====
+//
+// 手动触发一次试运行. 在事务里:
+//   1. 查 pipeline + current_version
+//   2. 创建 run (trigger_type=manual, status=pending)
+//   3. enqueue helios:run:orchestrate → worker 调度 stage
+//
+// 返 run 摘要, 前端拿到 id 后跳 /runs/:id.
+func (h *PipelineHandler) trigger(c *gin.Context) {
+	if h.enq == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "task queue not configured"})
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	var result struct {
+		RunID      int64  `json:"run_id"`
+		Number     int    `json:"number"`
+		PipelineID int64  `json:"pipeline_id"`
+		TaskID     string `json:"task_id"`
+	}
+
+	orgID, _ := activeOrg(c)
+
+	err = h.db.Transaction(func(tx *gorm.DB) error {
+		var pipeline model.Pipeline
+		if err := tx.Joins("JOIN projects ON projects.id = pipelines.project_id").
+			Where("pipelines.id = ? AND projects.org_id = ?", id, orgID).
+			First(&pipeline).Error; err != nil {
+			return fmt.Errorf("pipeline not found")
+		}
+		if pipeline.CurrentVersionID == nil {
+			return fmt.Errorf("pipeline has no saved version — save first")
+		}
+		var version model.PipelineVersion
+		if err := tx.First(&version, *pipeline.CurrentVersionID).Error; err != nil {
+			return fmt.Errorf("version not found")
+		}
+
+		var maxN int
+		if err := tx.Model(&model.Run{}).
+			Where("pipeline_id = ?", pipeline.ID).
+			Select("COALESCE(MAX(number), 0)").
+			Row().Scan(&maxN); err != nil {
+			return fmt.Errorf("scan max number: %w", err)
+		}
+
+		uid := userIDFrom(c)
+		triggerData, _ := json.Marshal(map[string]any{
+			"source":  "manual",
+			"user_id": uid,
+		})
+
+		run := model.Run{
+			PipelineID:  pipeline.ID,
+			VersionID:   version.ID,
+			Number:      maxN + 1,
+			Status:      "pending",
+			TriggerType: "manual",
+			TriggerData: datatypes.JSON(triggerData),
+			Branch:      "",
+			Message:     "manual trigger",
+			CreatedAt:   time.Now(),
+		}
+		if err := tx.Create(&run).Error; err != nil {
+			return fmt.Errorf("create run: %w", err)
+		}
+
+		taskID, err := h.enq.EnqueueRunOrchestrate(c.Request.Context(), &tasks.RunOrchestratePayload{
+			RunID:     run.ID,
+			ProjectID: pipeline.ProjectID,
+		})
+		if err != nil {
+			return fmt.Errorf("enqueue orchestrate: %w", err)
+		}
+
+		result.RunID = run.ID
+		result.Number = run.Number
+		result.PipelineID = pipeline.ID
+		result.TaskID = taskID
+		return nil
+	})
+
+	if err != nil {
+		switch {
+		case err.Error() == "pipeline not found":
+			c.JSON(http.StatusNotFound, gin.H{"error": "pipeline not found"})
+		case err.Error() == "pipeline has no saved version — save first":
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+	c.JSON(http.StatusCreated, result)
 }

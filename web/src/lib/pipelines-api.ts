@@ -190,3 +190,22 @@ export async function restorePipelineVersion(
     { token, method: "POST" },
   );
 }
+
+// —— 手动触发试运行 ——
+
+export interface TriggerResult {
+  run_id: number;
+  number: number;
+  pipeline_id: number;
+  task_id: string;
+}
+
+export async function triggerPipeline(
+  token: string | null,
+  pipelineId: number | string,
+): Promise<TriggerResult> {
+  return apiFetch<TriggerResult>(`/api/v1/pipelines/${pipelineId}/trigger`, {
+    token,
+    method: "POST",
+  });
+}

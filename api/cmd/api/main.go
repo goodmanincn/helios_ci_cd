@@ -183,7 +183,7 @@ func main() {
 	approvalSvc := service.NewApprovalService(gdb, runMachine).WithTimeoutEnqueuer(enq).WithOrchestrateEnqueuer(enq)
 	handler.NewRunHandler(gdb).WithRunControl(runMachine, enq).WithApproval(approvalSvc).Register(protected)
 	handler.NewMeHandler(gdb).Register(protected)
-	handler.NewPipelineHandler(gdb).Register(protected)
+	handler.NewPipelineHandler(gdb).WithQueue(enq).Register(protected)
 	handler.NewSecretHandler(gdb, vault).Register(protected)
 	handler.NewApprovalHandler(approvalSvc).Register(protected)
 	handler.NewClusterHandler(gdb).Register(protected)
